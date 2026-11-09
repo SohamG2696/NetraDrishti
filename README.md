@@ -304,3 +304,4 @@ Accepts a color retinal Fundus photograph via `multipart/form-data` (`file`).
 ## License
 
 This project is licensed under the [MIT License](LICENSE) with an express medical and educational use limitation.
+

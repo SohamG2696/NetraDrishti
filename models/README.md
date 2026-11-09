@@ -66,3 +66,4 @@ If setting up this repository on a fresh machine or collaborator workstation:
    curl http://localhost:8000/api/health
    ```
    The response will confirm `models_ready: true`.
+

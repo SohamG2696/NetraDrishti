@@ -27,7 +27,7 @@ export const DisclaimerBanner: React.FC<DisclaimerBannerProps> = ({ compact = fa
             Research & Educational Purpose Only
           </h4>
           <p className="mt-1 text-xs leading-relaxed text-amber-200/90">
-            {CLINICAL_DISCLAIMER} Softmax probabilities and Sigmoid scores quantify mathematical confidence distributions and do not constitute clinically calibrated medical certainty.
+            {CLINICAL_DISCLAIMER} Scores do not confirm or rule out a condition.
           </p>
         </div>
       </div>

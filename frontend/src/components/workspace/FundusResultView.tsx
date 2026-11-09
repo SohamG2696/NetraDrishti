@@ -63,9 +63,9 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-md bg-teal-950 px-2 py-0.5 text-[10px] font-mono text-teal-400 ring-1 ring-teal-500/30">
-                EfficientNet-B0 + ResNet-50 Ensemble
+                Fundus analysis
               </span>
               <span className="rounded-full bg-navy-800 px-2.5 py-0.5 text-xs font-semibold text-slate-300 ring-1 ring-navy-700">
                 8 Retinal Conditions Evaluated
@@ -77,7 +77,7 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
             </h2>
 
             <p className="max-w-2xl text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Evaluating multi-label pathologies across microvascular, neuro-ophthalmic, and degenerative retinal markers using individual F1-calibrated decision thresholds.
+              Explore the findings for eight retinal conditions.
             </p>
           </div>
 
@@ -100,7 +100,7 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
       </div>
 
       {/* Grid: 8 Disease Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {diseasesList.map((disease) => {
           const isDetected = disease.detected;
           const isSelected = selectedDisease === disease.code;
@@ -108,6 +108,11 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
           return (
             <div
               key={disease.code}
+              role="button"
+              tabIndex={0}
+              aria-pressed={isSelected}
+              aria-label={`Explore ${disease.fullName} clinical context`}
+              onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedDisease(isSelected ? null : disease.code); } }}
               onClick={() => setSelectedDisease(isSelected ? null : disease.code)}
               className={`glass-card cursor-pointer rounded-2xl p-5 transition-all ${
                 isSelected
@@ -117,7 +122,7 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
                   : 'border-navy-700/60 bg-navy-900/40 hover:border-navy-600'
               }`}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-mono font-bold text-white bg-navy-800 px-1.5 py-0.5 rounded border border-navy-700">
@@ -233,10 +238,10 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
         <div className="flex items-center justify-between pb-4 border-b border-navy-700/60">
           <div>
             <h3 className="text-sm font-bold text-white tracking-tight">
-              Ensemble Disease Score vs. Calibrated Threshold
+              Fundus condition scores
             </h3>
             <p className="text-[11px] text-slate-400">
-              Bars indicate predicted sigmoid probabilities; orange highlights indicate condition detection exceeding the threshold.
+              Orange highlights show scores above the screening threshold.
             </p>
           </div>
           <Eye className="h-4 w-4 text-teal-400" />
@@ -264,7 +269,7 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
                 fontWeight={600}
               />
               <Tooltip
-                cursor={{ fill: 'rgba(30, 47, 82, 0.4)' }}
+                  cursor={{ fill: 'rgba(217, 183, 124, 0.06)' }}
                 content={({ active, payload }) => {
                   if (active && payload && payload.length) {
                     const data = payload[0].payload;
@@ -290,7 +295,7 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
                 {chartData.map((entry) => (
                   <Cell
                     key={`cell-${entry.code}`}
-                    fill={entry.detected ? '#f59e0b' : '#0891b2'}
+                    fill={entry.detected ? '#f59e0b' : '#9e7e49'}
                   />
                 ))}
               </Bar>

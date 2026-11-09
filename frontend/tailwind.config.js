@@ -8,32 +8,37 @@ export default {
     extend: {
       colors: {
         navy: {
-          950: '#050811',
-          900: '#080d1a',
-          850: '#0d1527',
-          800: '#131f38',
-          750: '#182746',
-          700: '#1e2f52',
-          600: '#2b3f6c',
+          950: '#000000',
+          900: '#0a0a09',
+          850: '#11110f',
+          800: '#1b1b17',
+          750: '#23231d',
+          700: '#343329',
+          600: '#4c493c',
         },
         cyan: {
-          400: '#22d3ee',
-          500: '#06b6d4',
-          600: '#0891b2',
+          300: '#ebcda0',
+          400: '#d9b77c',
+          500: '#bd9a60',
+          600: '#9e7e49',
+          950: '#221a0d',
         },
         teal: {
-          400: '#2dd4bf',
-          500: '#14b8a6',
-          600: '#0d9488',
-        }
+          300: '#d8d1b2',
+          400: '#c2bc9b',
+          500: '#aaa17a',
+          600: '#827751',
+          950: '#1d1b11',
+        },
+        slate: { 100: '#eeede8', 200: '#dcdad1', 300: '#c2c1b7', 400: '#a1a295', 500: '#828477', 600: '#686a5d', 700: '#45483b', 800: '#26291f' },
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
         mono: ['JetBrains Mono', 'Fira Code', 'monospace']
       },
       boxShadow: {
-        'glow-cyan': '0 0 25px -5px rgba(6, 182, 212, 0.25)',
-        'glow-teal': '0 0 25px -5px rgba(20, 184, 166, 0.25)',
+        'glow-cyan': '0 0 25px -5px rgba(217, 183, 124, 0.18)',
+        'glow-teal': '0 0 25px -5px rgba(194, 188, 155, 0.15)',
       }
     },
   },

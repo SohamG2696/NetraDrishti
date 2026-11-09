@@ -120,8 +120,8 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   };
 
   return (
-    <div className="glass-panel rounded-2xl p-6 sm:p-7">
-      <div className="flex items-center justify-between pb-4">
+    <div className="upload-panel glass-panel rounded-2xl p-6 sm:p-7">
+      <div className="upload-panel-heading flex items-center justify-between pb-4">
         <div className="flex items-center gap-2">
           <FileImage className={`h-5 w-5 ${modality === 'OCT' ? 'text-cyan-400' : 'text-teal-400'}`} />
           <h3 className="text-sm font-bold tracking-tight text-white uppercase">
@@ -147,6 +147,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       <input
         ref={fileInputRef}
         type="file"
+        aria-label={`Upload ${modality} image`}
         accept=".jpg,.jpeg,.png,image/jpeg,image/png"
         className="hidden"
         onChange={handleFileChange}
@@ -156,11 +157,16 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       {/* Upload Drop Zone / Preview Container */}
       {!selectedFile ? (
         <div
+          role="button"
+          tabIndex={isLoading ? -1 : 0}
+          aria-label={`Choose ${modality} scan. JPEG or PNG, up to 10 MB.`}
+          aria-disabled={isLoading}
+          onKeyDown={event => { if (!isLoading && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); fileInputRef.current?.click(); } }}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative flex min-h-[240px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-all ${
+          onClick={() => { if (!isLoading) fileInputRef.current?.click(); }}
+          className={`upload-drop-zone relative flex min-h-[240px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-all ${
             isDragOver
               ? 'border-cyan-400 bg-cyan-950/20 shadow-glow-cyan'
               : 'border-navy-700/80 bg-navy-900/40 hover:border-navy-600 hover:bg-navy-900/70'
@@ -206,9 +212,9 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
               </div>
 
               {/* File Info */}
-              <div className="flex-1 space-y-2 text-left w-full">
+              <div className="file-info flex-1 space-y-2 text-left w-full">
                 <div className="flex items-start justify-between">
-                  <div className="max-w-[240px] truncate font-medium text-white text-sm" title={selectedFile.name}>
+                  <div className="file-name max-w-[240px] truncate font-medium text-white text-sm" title={selectedFile.name}>
                     {selectedFile.name}
                   </div>
                   {!isLoading && (
@@ -217,6 +223,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
                       onClick={handleClear}
                       className="rounded-lg p-1 text-slate-400 hover:bg-navy-800 hover:text-white transition-colors"
                       title="Remove file"
+                      aria-label="Remove file"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -253,7 +260,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 
       {/* Error callout if validation failed */}
       {errorMessage && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+        <div role="alert" className="mt-4 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
           <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
           <span>{errorMessage}</span>
         </div>
@@ -263,7 +270,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       {!isBackendReady && (
         <div className="mt-4 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
           <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
-          <span>NetraDrishti backend service is not ready. Analysis is currently disabled until models are available.</span>
+          <span>The analysis service is unavailable. Please try again shortly.</span>
         </div>
       )}
 

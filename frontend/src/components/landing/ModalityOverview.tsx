@@ -1,155 +1,27 @@
-import React from 'react';
-import { Layers, Eye, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { ArrowUpRight, Layers, ScanEye } from 'lucide-react';
 import type { Modality } from '../../types/api';
+import { Reveal } from '../common/Reveal';
 
-interface ModalityOverviewProps {
-  onSelectModality: (modality: Modality) => void;
-}
+const pathways = [
+  { modality: 'OCT' as Modality, number: '01', title: 'Beneath the surface.', subtitle: 'OCT IMAGING', description: 'A closer look at the layers within the retina.', image: '/images/oct-preview.webp', alt: 'Sample OCT scan showing a cross-section of the retinal layers', action: 'Explore OCT analysis' },
+  { modality: 'Fundus' as Modality, number: '02', title: 'The wider picture.', subtitle: 'FUNDUS PHOTOGRAPHY', description: 'A detailed view of the retinal surface.', image: '/images/fundus-preview.webp', alt: 'Sample fundus photograph showing the retinal surface and branching blood vessels', action: 'Explore fundus screening' },
+];
 
-export const ModalityOverview: React.FC<ModalityOverviewProps> = ({ onSelectModality }) => {
-  return (
-    <section className="py-16">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="text-center">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-cyan-400">
-            Dual Imaging Modalities
-          </h2>
-          <p className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            Choose the Clinical Imaging Pathway
-          </p>
-          <p className="mx-auto mt-3 max-w-2xl text-xs sm:text-sm text-slate-400">
-            Select between high-resolution cross-sectional optical tomograms or full-field color fundus photography.
-          </p>
-        </div>
-
-        <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-2">
-          {/* OCT Card */}
-          <div className="glass-panel group relative flex flex-col justify-between overflow-hidden rounded-2xl p-6 transition-all hover:border-cyan-500/50 hover:shadow-glow-cyan sm:p-8">
-            <div className="absolute top-0 right-0 h-40 w-40 bg-cyan-500/5 blur-3xl group-hover:bg-cyan-500/10 transition-colors" />
-
-            <div>
-              <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 ring-1 ring-cyan-500/30">
-                  <Layers className="h-6 w-6" />
-                </div>
-                <span className="rounded-full border border-cyan-500/30 bg-cyan-950/60 px-3 py-1 text-[11px] font-semibold text-cyan-300">
-                  Swin-Tiny Vision Transformer
-                </span>
-              </div>
-
-              <h3 className="mt-6 text-xl font-bold text-white">
-                Optical Coherence Tomography (OCT)
-              </h3>
-              <p className="mt-2 text-xs leading-relaxed text-slate-300">
-                Non-invasive interferometric optical imaging that provides micrometer-resolution cross-sectional visualization of neuroretinal stratification, RPE elevation, and fluid pooling.
-              </p>
-
-              <div className="mt-6 space-y-2 border-t border-navy-700/60 pt-4">
-                <div className="text-xs font-semibold text-slate-200">Detectable Conditions (4 Classes):</div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-                    <span>CNV (Wet AMD)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-                    <span>DME (Macular Edema)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-                    <span>DRUSEN (Dry AMD)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-                    <span>NORMAL (Healthy)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-4">
-              <button
-                onClick={() => onSelectModality('OCT')}
-                className="group/btn flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 px-4 py-3 text-xs font-semibold text-navy-950 transition-all hover:from-cyan-400 hover:to-teal-400 shadow-md shadow-cyan-500/20"
-              >
-                <span>Enter OCT Analysis Mode</span>
-                <ArrowRight className="h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
-              </button>
-            </div>
-          </div>
-
-          {/* Fundus Card */}
-          <div className="glass-panel group relative flex flex-col justify-between overflow-hidden rounded-2xl p-6 transition-all hover:border-teal-500/50 hover:shadow-glow-teal sm:p-8">
-            <div className="absolute top-0 right-0 h-40 w-40 bg-teal-500/5 blur-3xl group-hover:bg-teal-500/10 transition-colors" />
-
-            <div>
-              <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-500/10 text-teal-400 ring-1 ring-teal-500/30">
-                  <Eye className="h-6 w-6" />
-                </div>
-                <span className="rounded-full border border-teal-500/30 bg-teal-950/60 px-3 py-1 text-[11px] font-semibold text-teal-300">
-                  EfficientNet + ResNet-50 Ensemble
-                </span>
-              </div>
-
-              <h3 className="mt-6 text-xl font-bold text-white">
-                Digital Color Fundus Photography
-              </h3>
-              <p className="mt-2 text-xs leading-relaxed text-slate-300">
-                Full-field color ophthalmoscopic photography documenting the neuroretinal rim, optic disc cup, vascular branching, macular lutea, and peripheral retinal pigment distribution.
-              </p>
-
-              <div className="mt-6 space-y-2 border-t border-navy-700/60 pt-4">
-                <div className="text-xs font-semibold text-slate-200">Detectable Conditions (8 Categories):</div>
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Diabetic Retinopathy (DR)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Media Haze (MH)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Optic Disc Cupping (ODC)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Tessellated Fundus (TSLN)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Drusen (DN)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Pathological Myopia (MYA)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Macular Degeneration (ARMD)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span>Vein Occlusion (BRVO)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-4">
-              <button
-                onClick={() => onSelectModality('Fundus')}
-                className="group/btn flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 px-4 py-3 text-xs font-semibold text-navy-950 transition-all hover:from-teal-400 hover:to-cyan-400 shadow-md shadow-teal-500/20"
-              >
-                <span>Enter Fundus Screening Mode</span>
-                <ArrowRight className="h-4 w-4 transition-transform group-hover/btn:translate-x-1" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+export function ModalityOverview({ onSelectModality }: { onSelectModality: (modality: Modality) => void }) {
+  return <>
+    <div className="capability-strip page-container">
+      <div><span className="stat-value">02</span><span>Ways to look deeper<br /><small>OCT and fundus imaging</small></span></div>
+      <div><ScanEye className="capability-icon" /><span>A clearer perspective<br /><small>Images, insights and context</small></span></div>
+      <div><span className="stat-symbol">◎</span><span>Your images stay private<br /><small>Uploaded scans are not saved</small></span></div>
+    </div>
+    <section id="imaging" className="imaging-section page-container section-spacing" aria-labelledby="imaging-title">
+      <Reveal className="section-heading"><div><p className="eyebrow"><span className="section-number">01 /</span> TWO WAYS TO SEE MORE</p><h2 id="imaging-title">A different lens.<br />The same <span className="serif-accent">attention to detail.</span></h2></div><p>Choose the perspective that matches your image.<br />Each pathway is built for its own kind of insight.</p></Reveal>
+      <div className="pathway-grid">{pathways.map((path, index) => <Reveal className="pathway-card" delay={index * .1} key={path.modality}>
+        <div className="pathway-card-top"><span>{path.modality === 'OCT' ? <Layers size={18} /> : <ScanEye size={18} />}{path.subtitle}</span><span>{path.number}</span></div>
+        <figure className={`pathway-visual pathway-scan pathway-scan-${path.modality.toLowerCase()}`}><img src={path.image} alt={path.alt} width={path.modality === 'OCT' ? 1024 : 960} height={path.modality === 'OCT' ? 496 : 638} loading="lazy" decoding="async" /><figcaption>Sample {path.modality === 'OCT' ? 'OCT scan' : 'fundus image'}</figcaption></figure>
+        <div className="pathway-content"><h3>{path.title}</h3><p>{path.description}</p></div>
+        <button className="pathway-action" onClick={() => onSelectModality(path.modality)}>{path.action}<ArrowUpRight size={16} /></button>
+      </Reveal>)}</div>
     </section>
-  );
-};
+  </>;
+}

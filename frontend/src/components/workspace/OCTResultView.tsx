@@ -54,9 +54,9 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
     if (isPredicted) {
       if (className === 'NORMAL') return '#10b981'; // emerald
       if (className === 'DRUSEN') return '#f59e0b'; // amber
-      return '#06b6d4'; // cyan
+      return '#d9b77c'; // warm accent
     }
-    return '#1e2f52'; // dark muted
+    return '#514a3b'; // dark muted
   };
 
   return (
@@ -67,9 +67,9 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-md bg-cyan-950 px-2 py-0.5 text-[10px] font-mono text-cyan-400 ring-1 ring-cyan-500/30">
-                Swin-Tiny OCT Inference
+                OCT analysis
               </span>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${getUrgencyBadge(predictedInfo.urgency)}`}>
                 {predictedInfo.urgency} Urgency Category
@@ -88,13 +88,12 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
           {/* Highest Softmax Score Metric Card */}
           <div className="flex shrink-0 flex-col items-start md:items-end rounded-xl border border-navy-700 bg-navy-900/90 p-4 min-w-[200px]">
             <span className="text-[10px] font-semibold tracking-wider text-slate-400 uppercase">
-              Algorithmic Confidence
+              Analysis score
             </span>
             <div className="mt-1 flex items-baseline gap-1">
               <span className="text-3xl font-black font-mono text-cyan-400">
                 {(result.confidence * 100).toFixed(1)}%
               </span>
-              <span className="text-xs text-slate-500">Softmax</span>
             </div>
             <span className="mt-1 text-[11px] text-slate-400">
               Highest scoring class: <strong className="text-slate-200">{result.predicted_class}</strong>
@@ -110,10 +109,10 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
           <div className="flex items-center justify-between pb-4 border-b border-navy-700/60">
             <div>
               <h3 className="text-sm font-bold text-white tracking-tight">
-                Softmax Class Probability Distribution
+                OCT condition scores
               </h3>
               <p className="text-[11px] text-slate-400">
-                Normalized relative output distribution across all 4 OCT categories
+                Compare the scores across four OCT categories.
               </p>
             </div>
             <Layers className="h-4 w-4 text-cyan-400" />
@@ -141,7 +140,7 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
                   fontWeight={600}
                 />
                 <Tooltip
-                  cursor={{ fill: 'rgba(30, 47, 82, 0.4)' }}
+                  cursor={{ fill: 'rgba(217, 183, 124, 0.06)' }}
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const data = payload[0].payload;
@@ -229,7 +228,7 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
               <ShieldAlert className="h-3.5 w-3.5 text-cyan-400" />
               <span>Diagnostic Consideration Note</span>
             </div>
-            Softmax outputs reflect categorical model distribution on the 4-class training taxonomy. These probabilities are not calibrated clinical certainties.
+            Scores show how closely the image matches each category. They do not confirm a diagnosis.
           </div>
         </div>
       </div>

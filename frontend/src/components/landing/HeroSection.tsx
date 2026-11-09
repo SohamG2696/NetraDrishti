@@ -1,105 +1,114 @@
-import React from 'react';
-import { ArrowRight, Layers, Eye, ShieldCheck, Zap } from 'lucide-react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { motion, useMotionValue } from 'framer-motion';
+import { ArrowDown, ArrowRight, ArrowUpRight, MoveDown } from 'lucide-react';
+import { anatomyJourney, anatomyStops, clampProgress, journeyFrame } from '../background/anatomyJourney';
 import type { Modality } from '../../types/api';
 
 interface HeroSectionProps {
   onStartAnalysis: (modality?: Modality) => void;
+  onChapterChange: (chapter: number) => void;
 }
 
-export const HeroSection: React.FC<HeroSectionProps> = ({ onStartAnalysis }) => {
-  return (
-    <section className="relative overflow-hidden pt-12 pb-20 lg:pt-16 lg:pb-24">
-      {/* Background radial gradient glow */}
-      <div className="pointer-events-none absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[450px] w-[700px] rounded-full bg-gradient-to-tr from-cyan-500/10 via-teal-500/10 to-blue-600/5 blur-[120px]" />
+const motionQuery = '(prefers-reduced-motion: reduce)';
+const getReducedMotion = () => window.matchMedia(motionQuery).matches;
+const subscribeReducedMotion = (listener: () => void) => {
+  const query = window.matchMedia(motionQuery);
+  query.addEventListener('change', listener);
+  return () => query.removeEventListener('change', listener);
+};
 
-      <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
-        {/* Top pill badge */}
-        <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/40 px-3.5 py-1.5 text-xs font-medium text-cyan-300 backdrop-blur-md mb-6">
-          <span className="flex h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-          <span>Dual-Modality AI Ophthalmology Screening</span>
-          <span className="text-cyan-500/60">•</span>
-          <span className="text-slate-400">OCT + Fundus</span>
+export function HeroSection({ onStartAnalysis, onChapterChange }: HeroSectionProps) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotion, () => false);
+  const [chapter, setChapter] = useState(0);
+  const progress = useMotionValue(0);
+  const introOpacity = useMotionValue(1);
+  const detailOpacity = useMotionValue(0);
+  const metrics = useRef({ start: 0, distance: 1 });
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const timing = { frame: 0, selected: -1 };
+    const update = () => {
+      timing.frame = 0;
+      const value = reducedMotion ? anatomyJourney.get() : clampProgress((window.scrollY - metrics.current.start) / metrics.current.distance);
+      anatomyJourney.set(value);
+      progress.set(clampProgress(value * anatomyStops.length / (anatomyStops.length - 1)));
+      const returning = clampProgress((value - .94) / .06);
+      const intro = Math.max(1 - clampProgress(value / .095), returning * returning * (3 - 2 * returning));
+      introOpacity.set(intro);
+      detailOpacity.set(1 - intro);
+      section.dataset.exploring = intro < .5 ? 'true' : 'false';
+      const next = journeyFrame(value).index;
+      if (next !== timing.selected) { timing.selected = next; setChapter(next); onChapterChange(next); }
+    };
+    const onScroll = () => { if (!timing.frame) timing.frame = requestAnimationFrame(update); };
+    const measure = () => {
+      const header = document.querySelector('header')?.getBoundingClientRect().height || 0;
+      metrics.current = {
+        start: section.getBoundingClientRect().top + window.scrollY - header,
+        distance: Math.max(1, section.offsetHeight - window.innerHeight + header),
+      };
+      anatomyJourney.end = metrics.current.start + metrics.current.distance;
+      update();
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(section);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', measure, { passive: true });
+    measure();
+    return () => { cancelAnimationFrame(timing.frame); observer.disconnect(); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', measure); };
+  }, [reducedMotion, progress, introOpacity, detailOpacity, onChapterChange]);
+
+  const goToChapter = (index: number) => {
+    const value = index / anatomyStops.length;
+    if (reducedMotion) {
+      anatomyJourney.set(value); progress.set(index / (anatomyStops.length - 1)); setChapter(index); onChapterChange(index);
+      return;
+    }
+    window.scrollTo({ top: metrics.current.start + metrics.current.distance * value, behavior: 'smooth' });
+  };
+  const part = anatomyStops[chapter];
+
+  return <section ref={sectionRef} className="hero-scroll" aria-labelledby="hero-title">
+    <div className="hero-sticky">
+      <div className="hero-grid page-container">
+        <div className="hero-copy">
+          <div className="eyebrow"><span className="status-dot" /> A NEW PERSPECTIVE ON RETINAL HEALTH</div>
+          <div className="hero-narrative">
+            <motion.div className="hero-intro" style={{ opacity: introOpacity }}>
+              <h1 id="hero-title" tabIndex={-1}>Look deeper.<br />See <span className="serif-accent">beyond.</span></h1>
+              <p className="hero-description">An extraordinary organ.<br className="desktop-break" /> A more considered way to understand it.</p>
+              <p className="hero-support">Explore AI-powered retinal analysis through OCT and fundus imaging. Built for discovery, designed for clarity.</p>
+            </motion.div>
+            <motion.div className="hero-anatomy-detail" style={{ opacity: detailOpacity }} aria-hidden="true">
+              <span className="anatomy-kicker">FOLLOW THE ANATOMY / 0{chapter}</span>
+              <p className={`anatomy-name serif-accent${part.id === 'ciliary' ? ' anatomy-name-long' : ''}`}>{part.name}<span>.</span></p>
+              <p className="anatomy-heading">{part.title}</p>
+              <p className="anatomy-body">{part.detail}</p>
+            </motion.div>
+          </div>
+          <div className="hero-actions">
+            <button className="button-primary" onClick={() => onStartAnalysis('OCT')}>Start analysis <ArrowUpRight size={18} /></button>
+            <a className="button-text" href="#imaging">Explore the platform <ArrowDown size={15} /></a>
+          </div>
+          <div className="hero-footnote"><span className="tiny-cross">+</span> FOR RESEARCH. WITH VISION.</div>
         </div>
-
-        {/* Main Heading */}
-        <h1 className="mx-auto max-w-4xl text-3xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
-          Automated Retinal Pathology Analysis via{' '}
-          <span className="bg-gradient-to-r from-cyan-400 via-teal-300 to-blue-400 bg-clip-text text-transparent">
-            Deep Neural Ensembles
-          </span>
-        </h1>
-
-        {/* Subtitle */}
-        <p className="mx-auto mt-6 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base sm:leading-relaxed">
-          NetraDrishti combines hierarchical Vision Transformers for cross-sectional Optical Coherence Tomography (OCT) with dual-backbone CNN ensembles for digital Fundus photography, delivering rapid multi-condition retinal triage.
-        </p>
-
-        {/* Action CTAs */}
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-          <button
-            onClick={() => onStartAnalysis('OCT')}
-            className="group flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 px-6 py-3.5 text-sm font-semibold text-navy-950 shadow-lg shadow-cyan-500/25 transition-all hover:from-cyan-400 hover:to-teal-400 hover:shadow-cyan-500/40"
-          >
-            <span>Launch OCT Analysis</span>
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-          </button>
-
-          <button
-            onClick={() => onStartAnalysis('Fundus')}
-            className="flex items-center gap-2 rounded-xl border border-navy-700 bg-navy-900/80 px-6 py-3.5 text-sm font-semibold text-slate-200 backdrop-blur-sm transition-all hover:border-cyan-500/40 hover:bg-navy-850 hover:text-white"
-          >
-            <Eye className="h-4 w-4 text-cyan-400" />
-            <span>Launch Fundus Screening</span>
-          </button>
-        </div>
-
-        {/* Metric / Feature Highlights Grid */}
-        <div className="mt-16 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:gap-6">
-          <div className="glass-card rounded-2xl p-5 text-left transition-all hover:border-cyan-500/30">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 mb-3">
-              <Layers className="h-5 w-5" />
-            </div>
-            <div className="text-xl font-bold text-white">Swin-Tiny</div>
-            <div className="text-xs text-cyan-300 font-medium">OCT Tomography</div>
-            <p className="mt-1 text-[11px] text-slate-400 leading-snug">
-              Classifies CNV, DME, Drusen, and Normal with shifted window attention.
-            </p>
-          </div>
-
-          <div className="glass-card rounded-2xl p-5 text-left transition-all hover:border-teal-500/30">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/10 text-teal-400 mb-3">
-              <Eye className="h-5 w-5" />
-            </div>
-            <div className="text-xl font-bold text-white">8 Diseases</div>
-            <div className="text-xs text-teal-300 font-medium">Fundus Ensemble</div>
-            <p className="mt-1 text-[11px] text-slate-400 leading-snug">
-              EfficientNet-B0 + ResNet-50 50/50 weighted combination for RFMiD conditions.
-            </p>
-          </div>
-
-          <div className="glass-card rounded-2xl p-5 text-left transition-all hover:border-blue-500/30">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400 mb-3">
-              <Zap className="h-5 w-5" />
-            </div>
-            <div className="text-xl font-bold text-white">&lt; 1 Second</div>
-            <div className="text-xs text-blue-300 font-medium">Inference Latency</div>
-            <p className="mt-1 text-[11px] text-slate-400 leading-snug">
-              High-throughput in-memory inference without blocking the async event loop.
-            </p>
-          </div>
-
-          <div className="glass-card rounded-2xl p-5 text-left transition-all hover:border-cyan-500/30">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 mb-3">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-            <div className="text-xl font-bold text-white">Zero Storage</div>
-            <div className="text-xs text-cyan-300 font-medium">Privacy Guaranteed</div>
-            <p className="mt-1 text-[11px] text-slate-400 leading-snug">
-              Strictly in-memory pixel decoding with decompression-bomb protection.
-            </p>
-          </div>
+        <div className="eye-stage" role="img" aria-label={chapter === 0 ? 'Complete three-dimensional exploded eye. Scroll to bring each part into the centre and foreground.' : `The ${part.name.toLowerCase()} is moving into the centre and foreground. Continue scrolling to explore the next structure.`}>
+          <div className="figure-index"><span>THE ANATOMY OF SIGHT</span><span>SCROLL TO EXPLORE</span></div>
+          <div className="anatomy-caption"><span className="caption-number">0{chapter}</span><div><span className="eyebrow">{part.name}</span><p>{part.title}</p></div><span className="anatomy-caption-end">ANATOMICAL STUDY</span></div>
         </div>
       </div>
-    </section>
-  );
-};
+      <div className="hero-bottom page-container">
+        <div className="scroll-invitation"><MoveDown size={17} /><span>ONE EYE.<br />A CONTINUOUS JOURNEY.</span></div>
+        <nav className="anatomy-track" aria-label="Explore eye anatomy">
+          <div className="anatomy-track-line"><motion.div style={{ scaleX: progress }} /></div>
+          {anatomyStops.map((stop, index) => <button key={stop.id} className={chapter === index ? 'is-active' : ''} onClick={() => goToChapter(index)} aria-current={chapter === index ? 'step' : undefined} aria-label={`Explore ${stop.name}`}><i /><span>{stop.short}</span></button>)}
+        </nav>
+        <button className="hero-fundus-link" onClick={() => onStartAnalysis('Fundus')}>Fundus screening <ArrowRight size={14} /></button>
+      </div>
+      <div className="chapter-description page-container"><span className="sr-only" aria-live="polite">{part.name}. {part.detail}</span></div>
+    </div>
+  </section>;
+}
