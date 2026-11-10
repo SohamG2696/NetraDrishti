@@ -36,20 +36,30 @@ RUN pip install --no-cache-dir \
 COPY requirements-prod.txt ./
 RUN pip install --no-cache-dir -r requirements-prod.txt
 
-# Copy backend, inference engine, model stats, and startup bootstrapper
-COPY backend/ ./backend/
-COPY inference/ ./inference/
-COPY models/modality_validator_stats.npz ./models/modality_validator_stats.npz
-COPY scripts/fetch_models.py ./scripts/fetch_models.py
-COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
-
-# Normalize line endings on entrypoint.sh and set permissions
-RUN sed -i 's/\r$//' /app/scripts/entrypoint.sh && \
-    chmod +x /app/scripts/entrypoint.sh && \
-    groupadd --system appgroup && \
+# Create non-root runtime user and model directories before copying weights
+# so COPY --chown avoids duplicating ~442 MB of model layers.
+RUN groupadd --system appgroup && \
     useradd --system --gid appgroup --create-home appuser && \
     mkdir -p /app/models /app/.cache/torch/hub/checkpoints && \
     chown -R appuser:appgroup /app
+
+# Bundle all 4 required runtime model artifacts directly into /app/models
+# (placed before application code so code edits reuse the cached model layer)
+COPY --chown=appuser:appgroup \
+    models/swin_tiny_epoch3.pth \
+    models/netradrishti_fundus_ensemble.pth \
+    models/modality_validator_stats.npz \
+    models/efficientnet_b0_rwightman-7f5810bc.pth \
+    ./models/
+
+# Copy backend, inference engine, and entrypoint
+COPY --chown=appuser:appgroup backend/ ./backend/
+COPY --chown=appuser:appgroup inference/ ./inference/
+COPY --chown=appuser:appgroup scripts/entrypoint.sh ./scripts/entrypoint.sh
+
+# Normalize CRLF line endings on entrypoint.sh and mark executable
+RUN sed -i 's/\r$//' /app/scripts/entrypoint.sh && \
+    chmod +x /app/scripts/entrypoint.sh
 
 USER appuser
 

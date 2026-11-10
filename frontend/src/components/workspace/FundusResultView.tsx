@@ -129,13 +129,12 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({
               aria-label={`Explore ${disease.fullName} clinical context`}
               onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedDisease(isSelected ? null : disease.code); } }}
               onClick={() => setSelectedDisease(isSelected ? null : disease.code)}
-              className={`glass-card cursor-pointer rounded-2xl p-5 transition-all ${
-                isSelected
+              className={`glass-card cursor-pointer rounded-2xl p-5 transition-all ${isSelected
                   ? 'border-cyan-400 bg-navy-850 ring-1 ring-cyan-400/50 shadow-glow-cyan'
                   : isDetected
-                  ? 'border-amber-500/40 bg-navy-900/80 hover:border-amber-400/60'
-                  : 'border-navy-700/60 bg-navy-900/40 hover:border-navy-600'
-              }`}
+                    ? 'border-amber-500/40 bg-navy-900/80 hover:border-amber-400/60'
+                    : 'border-navy-700/60 bg-navy-900/40 hover:border-navy-600'
+                }`}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
@@ -151,11 +150,10 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({
 
                 {/* Detected / Negative Status Badge */}
                 <span
-                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                    isDetected
-                      ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40'
-                      : 'bg-slate-800/80 text-slate-400 ring-1 ring-slate-700'
-                  }`}
+                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${isDetected
+                    ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40'
+                    : 'bg-slate-800/80 text-slate-400 ring-1 ring-slate-700'
+                    }`}
                 >
                   {isDetected ? (
                     <>
@@ -183,9 +181,8 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({
                 <div className="relative h-2 w-full rounded-full bg-navy-950 overflow-hidden border border-navy-800">
                   {/* Score bar */}
                   <div
-                    className={`h-full rounded-full transition-all ${
-                      isDetected ? 'bg-gradient-to-r from-amber-500 to-rose-500' : 'bg-cyan-600/70'
-                    }`}
+                    className={`h-full rounded-full transition-all ${isDetected ? 'bg-gradient-to-r from-amber-500 to-rose-500' : 'bg-cyan-600/70'
+                      }`}
                     style={{ width: `${Math.min(100, Math.max(2, disease.percentage))}%` }}
                   />
                   {/* Threshold mark */}
@@ -293,7 +290,7 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({
                 fontWeight={600}
               />
               <Tooltip
-                  cursor={{ fill: 'rgba(217, 183, 124, 0.06)' }}
+                cursor={{ fill: 'rgba(217, 183, 124, 0.06)' }}
                 content={({ active, payload }) => {
                   if (active && payload && payload.length) {
                     const data = payload[0].payload;

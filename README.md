@@ -188,8 +188,8 @@ NetraDrishti/
 ├── scripts/
 │   ├── benchmark_cpu.py              # CPU startup, memory (RSS) & latency profiler
 │   ├── calibrate_modality_validator.py
-│   ├── entrypoint.sh                 # Container bootstrapper (sync models -> uvicorn)
-│   └── fetch_models.py               # Secure Azure Blob model sync (Managed Identity / SAS)
+│   ├── entrypoint.sh                 # Container bootstrapper (single-worker Uvicorn startup)
+│   └── fetch_models.py               # Optional legacy Azure Blob sync (inactive by default)
 ├── tests/
 │   ├── test_deployment_readiness.py  # Production hardening, liveness/readiness & CORS tests
 │   └── test_phase3.py                # Automated Grad-CAM, guardrail, endpoint & concurrency suite
@@ -256,22 +256,21 @@ npm run build
 
 ## Azure Deployment Architecture & Setup
 
-NetraDrishti is engineered for an Azure-only serverless deployment:
+NetraDrishti uses a self-contained, minimum-cost Azure architecture with all model artifacts baked directly into the backend Docker image (eliminating Azure Blob Storage and Azure Container Registry recurring charges):
 
-| Layer | Azure Service | Configuration Summary |
+| Layer | Service | Configuration Summary |
 |---|---|---|
-| **Frontend UI** | **Azure Static Web Apps** | App location: `frontend` \| Output location: `dist` \| Build command: `npm run build` \| `staticwebapp.config.json` SPA routing |
-| **Backend API** | **Azure Container Apps** | Linux CPU container (`Dockerfile`), `1` Uvicorn worker, `1.0 vCPU / 2.0 GiB` (peak Grad-CAM RSS `~1.04 GB`), HTTPS external ingress on port `8000` |
-| **Container Image** | **Azure Container Registry** | Built via `az acr build` (no local Docker daemon required) |
-| **Model Storage** | **Azure Blob Storage (LRS)** | Private container `models` storing `swin_tiny_epoch3.pth` (`315.4 MB`), `netradrishti_fundus_ensemble.pth` (`105.7 MB`), `efficientnet_b0_rwightman-7f5810bc.pth` (`20.5 MB`), and `modality_validator_stats.npz` (`0.8 MB`), accessed via System-Assigned Managed Identity |
+| **Frontend UI** | **Azure Static Web Apps (Free)** | App location: `frontend` \| Output location: `dist` \| Build command: `npm run build` \| `staticwebapp.config.json` SPA routing |
+| **Backend API** | **Azure Container Apps (Consumption)** | Self-contained Linux CPU container (`Dockerfile`), `1` Uvicorn worker, `1.0 vCPU / 2.0 GiB`, `minReplicas=0`, `maxReplicas=1`, `TORCH_NUM_THREADS=1`, HTTPS external ingress on port `8000` |
+| **Bundled Models** | **In-Image (`/app/models`)** | `swin_tiny_epoch3.pth` (`315.4 MB`), `netradrishti_fundus_ensemble.pth` (`105.7 MB`), `efficientnet_b0_rwightman-7f5810bc.pth` (`20.5 MB`), and `modality_validator_stats.npz` (`0.8 MB`) copied into the image during `docker build` |
+| **Container Registry** | **Private Docker Hub Free / GHCR** | 1 free private repo on Docker Hub (`index.docker.io`, pull via read-only PAT secret) or private `ghcr.io` package — \$0/month fixed registry cost |
 
 ### Quick Deployment Sequence
-1. Inspect [`deploy/azure/container-app.yaml`](deploy/azure/container-app.yaml) and [`deploy/azure/deploy.ps1`](deploy/azure/deploy.ps1) and replace `<PLACEHOLDER>` values.
-2. Provision a private Azure Storage container (`models`) and upload the 4 model files without public access.
-3. Build and push the Linux CPU backend container to ACR (`az acr build`).
-4. Deploy the Container App with `SystemAssigned` Managed Identity granted `Storage Blob Data Reader` and `AcrPull`, setting `ALLOWED_ORIGINS` to your Static Web App `https://*.azurestaticapps.net` URL.
-5. Deploy the React frontend to Azure Static Web Apps with build-time `VITE_API_BASE_URL=https://<your-container-app-fqdn>`.
-6. Verify live health (`/api/live` $\rightarrow$ `200`, `/api/health` $\rightarrow$ `200` with `models_ready: true` and `validator_ready: true`).
+1. Verify all 4 model artifacts exist under `models/` (copy `efficientnet_b0_rwightman-7f5810bc.pth` from `%USERPROFILE%\.cache\torch\hub\checkpoints\` if missing; `.gitignore` keeps all `.pth` files out of Git).
+2. Build and push the self-contained Linux CPU image (`docker build` + `docker push` to a private repository — see [`deploy/azure/deploy.ps1`](deploy/azure/deploy.ps1)).
+3. Create the Azure Container App using [`deploy/azure/container-app.yaml`](deploy/azure/container-app.yaml) (`minReplicas=0`, `maxReplicas=1`, `1.0 vCPU / 2.0 GiB`, read-only registry PAT secret, and `ALLOWED_ORIGINS` set to your Static Web App `https://*.azurestaticapps.net` URL).
+4. Deploy the React frontend to Azure Static Web Apps Free with build-time `VITE_API_BASE_URL=https://<your-container-app-fqdn>`.
+5. Verify live health (`/api/live` $\rightarrow$ `200`, `/api/health` $\rightarrow$ `200` with `models_ready: true` and `validator_ready: true`).
 
 ---
 

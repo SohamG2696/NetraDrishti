@@ -1,30 +1,40 @@
 # ==============================================================================
-# NetraDrishti — Azure Container Apps Declarative Template (Reference Config)
-# Replace <PLACEHOLDER> values before applying with:
-#   az containerapp create --resource-group <RG> --environment <ENV> --yaml deploy/azure/container-app.yaml
+# NetraDrishti — Azure Container Apps Declarative Template (Self-Contained Image)
 #
-# Sizing Rationale (derived from CPU benchmarks in scripts/benchmark_cpu.py):
-#   - Steady-state RSS with all 4 models loaded: ~891 MB
-#   - Peak RSS during Grad-CAM attribution:     ~1,042 MB (1.04 GB)
-#   -> 1.0 vCPU / 2.0 GiB is the minimum safe profile (~960 MB headroom).
-#   -> Upgrade to 2.0 vCPU / 4.0 GiB for faster CPU latency under demo load.
+# All 4 required model artifacts are bundled directly inside the Docker image
+# under /app/models — no Azure Blob Storage or external weight downloads needed.
+#
+# Replace <PLACEHOLDER> values before applying with:
+#   az containerapp create --resource-group <RG> --name <APP> --yaml deploy/azure/container-app.yaml
+#
+# Minimum-Cost Profile:
+#   - Azure Container Apps Consumption: 1.0 vCPU / 2.0 GiB (peak RSS ~914 MiB),
+#     minReplicas=0, maxReplicas=1 (scales to 0 when idle; uses monthly free grant)
+#   - Private Registry: Docker Hub Free (1 free private repo, $0/mo) with a
+#     read-only PAT secret, OR GHCR (`ghcr.io/<github-user>/netradrishti-backend`).
 # ==============================================================================
 properties:
   managedEnvironmentId: /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.App/managedEnvironments/<CONTAINER_ENV_NAME>
   configuration:
     activeRevisionsMode: Single
+    secrets:
+      - name: registry-password
+        value: <DOCKER_HUB_READONLY_PAT>
     ingress:
       external: true
       targetPort: 8000
       transport: auto
       allowInsecure: false
     registries:
-      - server: <ACR_NAME>.azurecr.io
-        identity: system
+      # Option A (Default, $0/mo): Private Docker Hub repo (1 private repo free)
+      # Option B ($0/mo): Switch server to ghcr.io and image to ghcr.io/<GITHUB_USER>/netradrishti-backend:v1.0.0
+      - server: index.docker.io
+        username: sohamg2696
+        passwordSecretRef: registry-password
   template:
     containers:
       - name: netradrishti-backend
-        image: <ACR_NAME>.azurecr.io/netradrishti-backend:v1.0.0
+        image: index.docker.io/sohamg2696/netradrishti-backend:v1.0.0
         resources:
           cpu: 1.0
           memory: 2Gi
@@ -53,24 +63,20 @@ properties:
             value: "60.0"
           - name: ALLOWED_ORIGINS
             value: https://<YOUR_SWA_SUBDOMAIN>.azurestaticapps.net
-          - name: AZURE_STORAGE_BLOB_BASE_URL
-            value: https://<STORAGE_ACCOUNT>.blob.core.windows.net/models
-          - name: AZURE_USE_MANAGED_IDENTITY
-            value: "true"
         probes:
           - type: Startup
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 18
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
             timeoutSeconds: 5
           - type: Liveness
             httpGet:
               path: /api/live
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 20
             periodSeconds: 30
             failureThreshold: 3
             timeoutSeconds: 5
@@ -78,18 +84,17 @@ properties:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             periodSeconds: 15
             failureThreshold: 3
             timeoutSeconds: 5
     scale:
-      # Use minReplicas: 1 during active demos to eliminate cold-start Blob sync (~15-45s).
-      # Set minReplicas: 0 between demos to minimize idle compute charges.
+      # Scale to 0 when idle ($0 compute charges while inactive; free monthly ACA grants apply).
+      # Keep minReplicas=0 and maxReplicas=1 for predictable student/personal cost control.
       minReplicas: 0
-      maxReplicas: 2
+      maxReplicas: 1
       rules:
         - name: http-concurrency
           http:
             metadata:
               concurrentRequests: "4"
-

@@ -1,5 +1,11 @@
 """
-Startup model-asset bootstrapper for NetraDrishti cloud deployments.
+[INACTIVE / OPTIONAL LEGACY UTILITY]
+Startup model-asset bootstrapper for external Azure Blob Storage deployments.
+
+The active NetraDrishti production Dockerfile bundles all 4 model artifacts
+directly into /app/models at build time, so scripts/entrypoint.sh does NOT
+invoke this script and Azure Blob Storage is not required. Retained only if an
+operator later switches back to external Blob-hosted checkpoints.
 
 Checks MODEL_DIR for required checkpoint files:
   - swin_tiny_epoch3.pth

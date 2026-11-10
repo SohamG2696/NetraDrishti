@@ -23,19 +23,20 @@ OCT.zip
 *.tar
 *.tar.gz
 
-# Frontend & tests (not needed in backend API container)
+# Frontend, notebooks, docs & host-only scripts (not needed in backend API container)
 frontend/
 notebooks/
 tests/
 deploy/
-scripts/calibrate_modality_validator.py
+scripts/*
+!scripts/entrypoint.sh
 
-# Large checkpoints (delivered at deployment/startup via Azure Blob or Volume Mount)
-models/*.pth
-models/*.pt
-models/*.csv
-models/README.md
+# Exclude everything in models/ except the 4 bundled runtime artifacts
+models/*
+!models/swin_tiny_epoch3.pth
+!models/netradrishti_fundus_ensemble.pth
 !models/modality_validator_stats.npz
+!models/efficientnet_b0_rwightman-7f5810bc.pth
 
 *.log
 Thumbs.db
