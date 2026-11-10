@@ -24,7 +24,7 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
     fullName: result.predicted_class,
     category: 'Ophthalmic Condition',
     urgency: 'Moderate',
-    shortDescription: 'Algorithmic classification from retinal OCT B-scan.',
+    shortDescription: 'A finding from the OCT image analysis.',
     clinicalDescription: 'No specific clinical narrative registered for this label.',
     keyFeatures: []
   };

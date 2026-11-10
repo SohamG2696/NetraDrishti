@@ -307,7 +307,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
             <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
               <div className="flex items-center gap-2 text-xs text-cyan-300">
                 <Loader2 className="h-4 w-4 animate-spin text-cyan-400" />
-                <span>Running deep neural inference on {modality} image...</span>
+                <span>Analyzing your {modality} image...</span>
               </div>
               <button
                 type="button"

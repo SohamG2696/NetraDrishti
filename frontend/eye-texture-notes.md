@@ -2,15 +2,15 @@
 
 These are generated illustrative material textures applied to the three-dimensional eye meshes. They are not patient images or clinical reference data. The interactive scene uses actual geometry with physically based lighting and a continuous scroll-driven anatomy journey.
 
-Generated with the built-in image-generation tool. Original outputs were preserved and copied into this project.
+Generated with the built-in image-generation tool. The website uses optimized WebP textures in `public/images/`.
 
-- Iris diffuse texture: `iris-albedo-realistic.png`
-- Four-quadrant tissue atlas: `ocular-tissue-atlas.png`
+- Iris diffuse texture: `iris-albedo-realistic.webp`
+- Four-quadrant tissue atlas: `ocular-tissue-atlas.webp`
 - Consuming scene: `frontend/src/components/background/eyeScene.ts`
 
-The original PNG files are retained. Production uses WebP copies at quality 94: 381 KB for the iris and 485 KB for the atlas, with the original resolution preserved. `eye-initial.webp` is a 42 KB transparent capture of the complete exploded-eye opening pose. It appears immediately during loading and if WebGL is unavailable. The canvas is exposed only after both textures and the final shaders are ready.
+Production uses WebP textures at quality 94: 381 KB for the iris and 485 KB for the atlas, with the original resolution preserved. `eye-initial.webp` is a 42 KB transparent capture of the complete exploded-eye opening pose. It appears immediately during loading and if WebGL is unavailable. The canvas is exposed only after both textures and the final shaders are ready.
 
-The complete exploded eye opens the journey. The iris, cornea, lens, ciliary body, vitreous, retina, choroid, and sclera then move individually into the same central foreground position. Passed structures recede to the lower left; upcoming structures remain behind the upper right. Position, rotation and scale interpolate on one continuous, reversible native scroll track. Poses are precomputed on resize so scroll frames do not measure layout or refit geometry. Keyboard-accessible markers provide direct navigation. Reduced motion removes the pinned journey and allows manual exploration. Rendering runs on demand and stops when motion settles.
+The complete exploded eye opens the journey. The iris, cornea, lens, ciliary body, vitreous, retina, choroid, and sclera then move individually into the same central foreground position. Passed structures recede to the lower left; upcoming structures remain behind the upper right. A final scroll interval returns every component to its original exploded-eye pose, which persists behind the remaining page. Position, rotation and scale interpolate on one continuous, reversible native scroll track. Poses are precomputed on resize so scroll frames do not measure layout or refit geometry. Keyboard-accessible markers provide direct navigation. Reduced motion removes the pinned journey and allows manual exploration. Rendering runs on demand and stops when motion settles.
 
 ## Final iris prompt
 

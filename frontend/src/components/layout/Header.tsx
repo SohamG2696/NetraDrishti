@@ -20,7 +20,7 @@ export function Header({ health, healthLoading, onRefreshHealth, activeView, onS
   return <header className="site-header">
     <a className="skip-link" href="#main-content">Skip to content</a>
     <div className="header-inner page-container">
-      <button className="brand" onClick={() => selectView('landing')} aria-label="NetraDrishti home"><BrandMark /><span>netra<span className="brand-light">drishti</span><small>RETINAL INTELLIGENCE</small></span></button>
+      <button className="brand" onClick={() => selectView('landing')} aria-label="NetraDrishti home"><BrandMark /><span>Netra<span className="brand-light">Drishti</span><small>RETINAL INTELLIGENCE</small></span></button>
       <nav className="desktop-nav" aria-label="Main navigation"><button className={activeView === 'landing' ? 'nav-active' : ''} onClick={() => selectView('landing')} aria-current={activeView === 'landing' ? 'page' : undefined}>Overview</button><button onClick={() => selectSection('imaging')}>Imaging</button><button onClick={() => selectSection('how-it-works')}>How it works</button><button onClick={() => selectSection('research')}>Research</button></nav>
       <div className="header-actions">
         <button className={`health-indicator ${isHealthy ? 'is-ready' : ''}`} onClick={onRefreshHealth} disabled={healthLoading} title="Refresh analysis service status" aria-label={`Analysis service ${healthLoading ? 'checking' : isHealthy ? 'ready' : 'offline'}. Refresh status.`}>{healthLoading ? <RefreshCw size={11} className="animate-spin" /> : <span />}<span className="health-label">{healthLoading ? 'Checking' : isHealthy ? `Ready · ${health?.device?.toUpperCase() || 'CPU'}` : 'Service offline'}</span></button>

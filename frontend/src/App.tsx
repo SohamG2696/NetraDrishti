@@ -195,7 +195,7 @@ export const App: React.FC = () => {
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setErrorMessage('Inference was canceled by user.');
+        setErrorMessage('Analysis was canceled by user.');
       } else if (err instanceof ApiError) {
         setErrorMessage(err.detail);
       } else if (err instanceof Error) {

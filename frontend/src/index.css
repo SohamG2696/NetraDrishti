@@ -139,20 +139,19 @@
 .pathway-card-top > span:last-child { color: #75694f; }
 .pathway-visual { padding: 17px 28px 5px; }
 .capability-icon { width: 36px; height: 36px; color: var(--accent); stroke-width: 1.2; }
-.pathway-scan { position: relative; display: grid; place-items: center; height: clamp(230px, 24vw, 310px); margin: 22px 22px 8px; padding: 20px 18px 36px; background: #000; border-radius: 5px; overflow: hidden; }
-.pathway-scan img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
-.pathway-scan-oct img { border-radius: 3px; }
-.pathway-scan figcaption { position: absolute; bottom: 12px; left: 17px; color: #a6a090; font: 7px 'JetBrains Mono', monospace; letter-spacing: .14em; text-transform: uppercase; }
+.pathway-model { position: relative; height: clamp(250px, 25vw, 330px); margin: 22px 22px 8px; padding: 0; background: #000; border-radius: 5px; overflow: hidden; }
+.pathway-model figcaption { position: absolute; bottom: 12px; left: 17px; color: #a6a090; font: 7px 'JetBrains Mono', monospace; letter-spacing: .14em; text-transform: uppercase; pointer-events: none; }
+.retinal-model { position: absolute; inset: 0 0 26px; touch-action: pan-y; }
+.retinal-model-canvas { display: block; width: 100%; height: 100%; opacity: 0; transition: opacity .35s; }
+.retinal-model-poster { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; transition: opacity .35s; }
+.retinal-model[data-renderer="webgl"] .retinal-model-canvas { opacity: 1; }
+.retinal-model[data-renderer="webgl"] .retinal-model-poster { opacity: 0; }
+.retinal-model[data-renderer="fallback"] .retinal-model-canvas { opacity: 0; }
 .pathway-card { background-color: #080807; }
 .retinal-illustration { width: 100%; height: auto; }
 .pathway-content { padding: 12px 32px 26px; flex: 1; }
 .pathway-content h3 { font-size: 27px; font-weight: 400; letter-spacing: -.045em; }
 .pathway-content p { margin-top: 12px; font-size: 11px; color: #96968b; line-height: 1.9; max-width: 400px; }
-.condition-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 24px; }
-.condition-tags span { border: 1px solid #302e26; background: #15140f; color: #b8b2a3; padding: 5px 8px; font-size: 8px; border-radius: 3px; }
-.pathway-bottom { display: flex; justify-content: space-between; align-items: center; margin-inline: 32px; padding: 17px 0; border-top: 1px solid #2a2822; font: 8px 'JetBrains Mono', monospace; color: #89887c; }
-.pathway-bottom button { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid #514632; border-radius: 50%; color: var(--accent); transition: background .2s; }
-.pathway-bottom button:hover { background: #2c2417; }
 .pathway-action { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 18px 32px; border-top: 1px solid #27241c; background: #13110b; color: #d3bd96; font-size: 10px; }
 .workflow-section { border-block: 1px solid var(--line); background: #08080791; }
 .section-side-note { color: #858378; font: 7px 'JetBrains Mono', monospace; letter-spacing: .1em; padding-bottom: 6px; white-space: nowrap; }
@@ -180,12 +179,6 @@
 .research-details details[open] summary svg { transform: rotate(180deg); }
 .research-detail-body { padding-bottom: 27px; }
 .research-detail-body > p { font-size: 11px; color: #95958a; line-height: 1.9; }
-.research-detail-body dl { margin-top: 19px; }
-.research-detail-body dl > div { display: flex; justify-content: space-between; gap: 16px; font-size: 9px; padding-block: 9px; border-bottom: 1px solid #202019; }
-.research-detail-body dt { color: #929184; }
-.research-detail-body dd { color: #cac3b1; text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 8px; }
-.research-detail-body dd.accent-text { color: var(--accent); }
-.research-detail-body p.metric-context { font-size: 8px; margin-top: 13px; color: #858173; }
 
 /* Shared workspace surfaces retain the existing upload and result behavior. */
 .glass-panel { background: #0b0b0be8; border: 1px solid #30302a; }
@@ -306,7 +299,6 @@
   .pathway-content { padding-inline: 22px; }
   .pathway-content h3 { font-size: 24px; }
   .pathway-content p { font-size: 10px; }
-  .pathway-bottom { margin-inline: 22px; font-size: 6px; }
   .pathway-action { padding-inline: 22px; font-size: 9px; }
   .workflow-step { padding-inline: 20px; }
   .workflow-step h3 { font-size: 16px; }
@@ -357,12 +349,11 @@
   .section-heading h2, .research-intro h2 { font-size: 34px; margin-top: 17px; }
   .section-heading > p { padding-top: 17px; max-width: 320px; font-size: 11px; }
   .pathway-grid { grid-template-columns: 1fr; gap: 22px; }
-  .pathway-scan { margin: 18px 18px 6px; height: 240px; padding: 16px 10px 32px; }
+  .pathway-model { margin: 18px 18px 6px; height: 260px; padding: 0; }
   .pathway-card-top { font-size: 7px; }
   .pathway-visual { padding-top: 12px; }
   .pathway-content h3 { font-size: 27px; }
   .pathway-content p { font-size: 11px; }
-  .pathway-bottom { font-size: 7px; }
   .pathway-action { font-size: 10px; }
   .workflow-grid { grid-template-columns: 1fr; gap: 26px; }
   .workflow-step, .workflow-step:first-child, .workflow-step:last-child { padding: 0 0 25px; border: 0; border-bottom: 1px solid #2d2b24; }
@@ -451,6 +442,10 @@
   .eye-stage { height: 100%; min-height: 0; }
   .hero-bottom { padding-block: 12px 8px; }
   .chapter-description { font-size: 8px; min-height: 28px; padding-bottom: 10px; }
+}
+@media (max-width: 380px) {
+  .header-actions .health-label { display: none; }
+  .brand { font-size: 20px; gap: 8px; }
 }
 @media (max-height: 720px) and (max-width: 560px) {
   .hero-grid { padding-top: 12px; }
