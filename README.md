@@ -160,38 +160,52 @@ NetraDrishti/
 │   ├── __init__.py
 │   ├── main.py                     # FastAPI endpoints, 422 guardrails & thread locking
 │   └── schemas.py                  # Pydantic schemas (Prediction + Explanation)
+├── deploy/
+│   └── azure/
+│       ├── container-app.yaml        # Azure Container Apps YAML (1.0 vCPU / 2.0 GiB)
+│       └── deploy.ps1                # Step-by-step Azure CLI deployment runbook
 ├── frontend/
-│   ├── public/samples/             # Demo OCT and Fundus samples
+│   ├── public/
+│   │   ├── samples/                  # Demo OCT and Fundus samples
+│   │   └── staticwebapp.config.json  # Azure Static Web Apps SPA fallback & security headers
 │   └── src/
 │       ├── components/workspace/
-│       │   ├── GradCamSection.tsx  # Interactive Grad-CAM viewer, opacity slider & PNG export
+│       │   ├── GradCamSection.tsx    # Interactive Grad-CAM viewer, opacity slider & PNG export
 │       │   ├── OCTResultView.tsx
 │       │   ├── FundusResultView.tsx
 │       │   ├── ImageUploader.tsx
 │       │   └── ModalitySelector.tsx
-│       ├── services/api.ts         # Typed API client (/predict/*, /explain/*, /health)
+│       ├── services/api.ts           # Typed API client (/predict/*, /explain/*, /health)
 │       └── types/api.ts
 ├── inference/
-│   ├── gradcam.py                  # SwinOCTGradCAM & FundusEnsembleGradCAM
-│   ├── modality_validator.py       # ImageNet EffNet-B0 PCA-128 OOD modality guardrail
-│   └── predictor.py                # Unified predictor & explainability orchestration
+│   ├── gradcam.py                    # SwinOCTGradCAM & FundusEnsembleGradCAM
+│   ├── modality_validator.py         # ImageNet EffNet-B0 PCA-128 OOD modality guardrail
+│   └── predictor.py                  # Unified predictor & explainability orchestration
 ├── models/
-│   ├── README.md                   # Checkpoint & calibration setup guide
-│   └── modality_validator_stats.npz
-├── notebooks/                      # Research & training notebooks (EDA, Grad_Cam, Fundus)
+│   ├── README.md                     # Checkpoint & calibration setup guide
+│   └── modality_validator_stats.npz  # Calibrated PCA-128 guardrail reference (793 KB)
+├── notebooks/                        # Research & training notebooks (EDA, Grad_Cam, Fundus)
 ├── scripts/
-│   └── calibrate_modality_validator.py  # Reproducible guardrail calibration & held-out eval
+│   ├── benchmark_cpu.py              # CPU startup, memory (RSS) & latency profiler
+│   ├── calibrate_modality_validator.py
+│   ├── entrypoint.sh                 # Container bootstrapper (sync models -> uvicorn)
+│   └── fetch_models.py               # Secure Azure Blob model sync (Managed Identity / SAS)
 ├── tests/
-│   └── test_phase3.py              # Automated Grad-CAM, guardrail, endpoint & concurrency suite
-└── requirements.txt
+│   ├── test_deployment_readiness.py  # Production hardening, liveness/readiness & CORS tests
+│   └── test_phase3.py                # Automated Grad-CAM, guardrail, endpoint & concurrency suite
+├── .dockerignore
+├── Dockerfile                        # Linux CPU FastAPI production container
+├── requirements-prod.txt             # Minimal Linux CPU runtime dependencies
+└── requirements.txt                  # Full local development & research dependencies
 ```
 
 ---
 
 ## API Specification
 
-### `GET /api/health`
-Returns readiness for both disease models and the modality guardrail (`models_ready`, `validator_ready`, `device`).
+### `GET /api/live` & `GET /api/health`
+- **`GET /api/live`**: Lightweight container liveness probe (`200 OK`) verifying the FastAPI/Uvicorn HTTP process is responsive.
+- **`GET /api/health`**: Readiness probe returning `200 OK` only when all disease models and the modality guardrail are loaded (`models_ready: true`, `validator_ready: true`), or `503 Service Unavailable` otherwise.
 
 ### `POST /api/predict/oct` and `POST /api/predict/fundus`
 Enforce upload limits (10 MB, JPEG/PNG), Pillow safe decoding, and modality validation (`HTTP 422` if wrong-modality or `unknown`) prior to running disease classification.
@@ -218,10 +232,16 @@ npm run dev
 ```
 Open **[http://localhost:5173](http://localhost:5173)** (Swagger UI at **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**).
 
-### 2. Running Verification Tests
+### 2. Running Verification & Benchmark Tests
 ```powershell
 # Run Phase 3 Grad-CAM, modality guardrail, API contract & concurrency tests
 python -u tests/test_phase3.py
+
+# Run production hardening, liveness/readiness & missing-model checks
+python -u tests/test_deployment_readiness.py
+
+# Run CPU startup, peak RSS memory & latency benchmarks
+python -u scripts/benchmark_cpu.py
 
 # Re-run modality guardrail calibration & full 1,641 held-out test split evaluation
 python -u scripts/calibrate_modality_validator.py
@@ -231,6 +251,27 @@ cd frontend
 npm run lint
 npm run build
 ```
+
+---
+
+## Azure Deployment Architecture & Setup
+
+NetraDrishti is engineered for an Azure-only serverless deployment:
+
+| Layer | Azure Service | Configuration Summary |
+|---|---|---|
+| **Frontend UI** | **Azure Static Web Apps** | App location: `frontend` \| Output location: `dist` \| Build command: `npm run build` \| `staticwebapp.config.json` SPA routing |
+| **Backend API** | **Azure Container Apps** | Linux CPU container (`Dockerfile`), `1` Uvicorn worker, `1.0 vCPU / 2.0 GiB` (peak Grad-CAM RSS `~1.04 GB`), HTTPS external ingress on port `8000` |
+| **Container Image** | **Azure Container Registry** | Built via `az acr build` (no local Docker daemon required) |
+| **Model Storage** | **Azure Blob Storage (LRS)** | Private container `models` storing `swin_tiny_epoch3.pth` (`315.4 MB`), `netradrishti_fundus_ensemble.pth` (`105.7 MB`), `efficientnet_b0_rwightman-7f5810bc.pth` (`20.5 MB`), and `modality_validator_stats.npz` (`0.8 MB`), accessed via System-Assigned Managed Identity |
+
+### Quick Deployment Sequence
+1. Inspect [`deploy/azure/container-app.yaml`](deploy/azure/container-app.yaml) and [`deploy/azure/deploy.ps1`](deploy/azure/deploy.ps1) and replace `<PLACEHOLDER>` values.
+2. Provision a private Azure Storage container (`models`) and upload the 4 model files without public access.
+3. Build and push the Linux CPU backend container to ACR (`az acr build`).
+4. Deploy the Container App with `SystemAssigned` Managed Identity granted `Storage Blob Data Reader` and `AcrPull`, setting `ALLOWED_ORIGINS` to your Static Web App `https://*.azurestaticapps.net` URL.
+5. Deploy the React frontend to Azure Static Web Apps with build-time `VITE_API_BASE_URL=https://<your-container-app-fqdn>`.
+6. Verify live health (`/api/live` $\rightarrow$ `200`, `/api/health` $\rightarrow$ `200` with `models_ready: true` and `validator_ready: true`).
 
 ---
 

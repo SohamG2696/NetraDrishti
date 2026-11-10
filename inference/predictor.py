@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -11,15 +12,33 @@ from inference.gradcam import SwinOCTGradCAM, FundusEnsembleGradCAM
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEVICE = torch.device(
-    "xpu" if torch.xpu.is_available() else "cpu"
-)
+
+
+def resolve_device() -> torch.device:
+    requested = os.getenv("NETRADRISHTI_DEVICE", "").strip().lower()
+    has_xpu = hasattr(torch, "xpu") and torch.xpu.is_available()
+    if requested == "cpu":
+        return torch.device("cpu")
+    if requested == "xpu":
+        return torch.device("xpu" if has_xpu else "cpu")
+    return torch.device("xpu" if has_xpu else "cpu")
+
+
+DEVICE = resolve_device()
 
 
 class NetraDrishtiPredictor:
-    def __init__(self):
+    def __init__(self, model_dir: Optional[Path] = None):
+        resolved_dir = Path(model_dir or os.getenv("MODEL_DIR", BASE_DIR / "models"))
+        self.model_dir = resolved_dir
+        self.device = DEVICE
+
         # Fundus ensemble loading
-        fundus_path = BASE_DIR / "models" / "netradrishti_fundus_ensemble.pth"
+        fundus_path = resolved_dir / "netradrishti_fundus_ensemble.pth"
+        if not fundus_path.exists():
+            raise FileNotFoundError(
+                f"Required Fundus checkpoint missing: {fundus_path.name}"
+            )
 
         checkpoint = torch.load(
             fundus_path,
@@ -69,7 +88,11 @@ class NetraDrishtiPredictor:
         ])
 
         # OCT Swin-Tiny loading
-        oct_path = BASE_DIR / "models" / "swin_tiny_epoch3.pth"
+        oct_path = resolved_dir / "swin_tiny_epoch3.pth"
+        if not oct_path.exists():
+            raise FileNotFoundError(
+                f"Required OCT checkpoint missing: {oct_path.name}"
+            )
         oct_checkpoint = torch.load(
             oct_path,
             map_location="cpu",

@@ -1,0 +1,95 @@
+# ==============================================================================
+# NetraDrishti — Azure Container Apps Declarative Template (Reference Config)
+# Replace <PLACEHOLDER> values before applying with:
+#   az containerapp create --resource-group <RG> --environment <ENV> --yaml deploy/azure/container-app.yaml
+#
+# Sizing Rationale (derived from CPU benchmarks in scripts/benchmark_cpu.py):
+#   - Steady-state RSS with all 4 models loaded: ~891 MB
+#   - Peak RSS during Grad-CAM attribution:     ~1,042 MB (1.04 GB)
+#   -> 1.0 vCPU / 2.0 GiB is the minimum safe profile (~960 MB headroom).
+#   -> Upgrade to 2.0 vCPU / 4.0 GiB for faster CPU latency under demo load.
+# ==============================================================================
+properties:
+  managedEnvironmentId: /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.App/managedEnvironments/<CONTAINER_ENV_NAME>
+  configuration:
+    activeRevisionsMode: Single
+    ingress:
+      external: true
+      targetPort: 8000
+      transport: auto
+      allowInsecure: false
+    registries:
+      - server: <ACR_NAME>.azurecr.io
+        identity: system
+  template:
+    containers:
+      - name: netradrishti-backend
+        image: <ACR_NAME>.azurecr.io/netradrishti-backend:v1.0.0
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+        env:
+          - name: APP_ENV
+            value: production
+          - name: PORT
+            value: "8000"
+          - name: LOG_LEVEL
+            value: INFO
+          - name: ENABLE_DOCS
+            value: "true"
+          - name: NETRADRISHTI_DEVICE
+            value: cpu
+          - name: TORCH_NUM_THREADS
+            value: "1"
+          - name: OMP_NUM_THREADS
+            value: "1"
+          - name: MODEL_DIR
+            value: /app/models
+          - name: MAX_UPLOAD_SIZE_BYTES
+            value: "10485760"
+          - name: MAX_CONCURRENT_INFERENCE
+            value: "4"
+          - name: INFERENCE_TIMEOUT_SECONDS
+            value: "60.0"
+          - name: ALLOWED_ORIGINS
+            value: https://<YOUR_SWA_SUBDOMAIN>.azurestaticapps.net
+          - name: AZURE_STORAGE_BLOB_BASE_URL
+            value: https://<STORAGE_ACCOUNT>.blob.core.windows.net/models
+          - name: AZURE_USE_MANAGED_IDENTITY
+            value: "true"
+        probes:
+          - type: Startup
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 18
+            timeoutSeconds: 5
+          - type: Liveness
+            httpGet:
+              path: /api/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+          - type: Readiness
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 5
+    scale:
+      # Use minReplicas: 1 during active demos to eliminate cold-start Blob sync (~15-45s).
+      # Set minReplicas: 0 between demos to minimize idle compute charges.
+      minReplicas: 0
+      maxReplicas: 2
+      rules:
+        - name: http-concurrency
+          http:
+            metadata:
+              concurrentRequests: "4"
+

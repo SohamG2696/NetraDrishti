@@ -1,0 +1,43 @@
+# Exclude large datasets, local checkpoints, frontend, notebooks, and secrets
+.git/
+.github/
+.gitignore
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+anaconda_projects/
+
+# Local datasets & archives
+OCT/
+RFMiD/
+Fundus/
+OCT.zip
+*.zip
+*.tar
+*.tar.gz
+
+# Frontend & tests (not needed in backend API container)
+frontend/
+notebooks/
+tests/
+deploy/
+scripts/calibrate_modality_validator.py
+
+# Large checkpoints (delivered at deployment/startup via Azure Blob or Volume Mount)
+models/*.pth
+models/*.pt
+models/*.csv
+models/README.md
+!models/modality_validator_stats.npz
+
+*.log
+Thumbs.db
+.DS_Store
+

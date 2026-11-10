@@ -4,16 +4,19 @@ Integrates trained OCT (Swin-Tiny) and Fundus (EfficientNet-B0 + ResNet-50) mode
 OOD-aware image modality guardrails, and authentic Grad-CAM explainability.
 """
 
+import gc
 import io
+import math
 import os
 import sys
 import logging
 import threading
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 from contextlib import asynccontextmanager
 
+import torch
 from PIL import Image, UnidentifiedImageError
 from fastapi import FastAPI, File, Query, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -35,9 +38,17 @@ from backend.schemas import (
     DiseaseResult,
 )
 
+# Environment-driven configuration
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+LOG_LEVEL = getattr(logging, LOG_LEVEL_NAME, logging.INFO)
+ENABLE_DOCS = os.getenv("ENABLE_DOCS", "true").strip().lower() in {"1", "true", "yes"}
+MAX_CONCURRENT_INFERENCE = max(1, int(os.getenv("MAX_CONCURRENT_INFERENCE", "4")))
+INFERENCE_TIMEOUT_SECONDS = max(5.0, float(os.getenv("INFERENCE_TIMEOUT_SECONDS", "60.0")))
+
 # Configure structured logging (no private paths or sensitive patient data)
 logging.basicConfig(
-    level=logging.INFO,
+    level=LOG_LEVEL,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("netradrishti.backend")
@@ -53,8 +64,60 @@ DISCLAIMER_TEXT = (
     "Always consult a qualified ophthalmologist or healthcare professional for clinical evaluation."
 )
 
-# Inference & Grad-CAM thread-safety lock for concurrent execution
+# Inference & Grad-CAM thread-safety lock + bounded queue semaphore
 inference_lock = threading.Lock()
+inference_queue_semaphore: Optional[asyncio.BoundedSemaphore] = None
+
+
+def _get_queue_semaphore() -> asyncio.BoundedSemaphore:
+    global inference_queue_semaphore
+    if inference_queue_semaphore is None:
+        inference_queue_semaphore = asyncio.BoundedSemaphore(MAX_CONCURRENT_INFERENCE)
+    return inference_queue_semaphore
+
+
+def _detect_cgroup_cpu_limit() -> Optional[int]:
+    """Detect Linux container CPU quota (cgroup v2 / v1) to avoid OpenMP thrashing."""
+    try:
+        v2_path = Path("/sys/fs/cgroup/cpu.max")
+        if v2_path.exists():
+            parts = v2_path.read_text(encoding="utf-8").strip().split()
+            if len(parts) == 2 and parts[0] != "max":
+                quota, period = int(parts[0]), int(parts[1])
+                if quota > 0 and period > 0:
+                    return max(1, math.floor(quota / period))
+        v1_quota = Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+        v1_period = Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+        if v1_quota.exists() and v1_period.exists():
+            quota = int(v1_quota.read_text(encoding="utf-8").strip())
+            period = int(v1_period.read_text(encoding="utf-8").strip())
+            if quota > 0 and period > 0:
+                return max(1, math.floor(quota / period))
+    except Exception:
+        pass
+    return None
+
+
+def _configure_cpu_threads() -> None:
+    if str(DEVICE) != "cpu":
+        return
+    explicit = os.getenv("TORCH_NUM_THREADS", "").strip()
+    if explicit.isdigit() and int(explicit) >= 1:
+        target = int(explicit)
+    else:
+        cgroup_cpus = _detect_cgroup_cpu_limit()
+        if cgroup_cpus is None:
+            return
+        target = cgroup_cpus
+    try:
+        torch.set_num_threads(target)
+        interop_env = os.getenv("TORCH_NUM_INTEROP_THREADS", "1").strip()
+        interop = int(interop_env) if interop_env.isdigit() and int(interop_env) >= 1 else 1
+        torch.set_num_interop_threads(interop)
+    except RuntimeError:
+        # Interop thread pool can only be configured once before parallel work starts
+        pass
+    logger.info(f"Configured PyTorch CPU intra-op threads={torch.get_num_threads()}")
 
 
 @asynccontextmanager
@@ -64,11 +127,21 @@ async def lifespan(app: FastAPI):
     Initializes NetraDrishtiPredictor and ModalityValidator once at startup.
     Reuses initialized models for all subsequent requests.
     """
-    logger.info("Initializing NetraDrishtiPredictor and ModalityValidator...")
+    global inference_queue_semaphore
+    inference_queue_semaphore = asyncio.BoundedSemaphore(MAX_CONCURRENT_INFERENCE)
+    _configure_cpu_threads()
+
+    logger.info(
+        f"Starting NetraDrishti backend (env={APP_ENV}, max_concurrent={MAX_CONCURRENT_INFERENCE}, timeout={INFERENCE_TIMEOUT_SECONDS}s)..."
+    )
     try:
         app.state.predictor = NetraDrishtiPredictor()
         app.state.models_ready = True
         logger.info(f"NetraDrishtiPredictor initialized on device: {DEVICE}")
+    except FileNotFoundError as fnf:
+        logger.error(f"Model initialization failed: {fnf}")
+        app.state.predictor = None
+        app.state.models_ready = False
     except Exception:
         logger.error("Failed to initialize NetraDrishtiPredictor.", exc_info=True)
         app.state.predictor = None
@@ -101,24 +174,29 @@ app = FastAPI(
         "**Disclaimer:** For research and educational purposes only. Not intended for clinical diagnosis."
     ),
     version="1.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if ENABLE_DOCS else None,
+    redoc_url="/redoc" if ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_DOCS else None,
     lifespan=lifespan
 )
 
-# Controlled CORS configuration
+# Controlled CORS configuration (reject wildcard origins in production)
 raw_origins = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
 )
 allowed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+if APP_ENV == "production":
+    if "*" in allowed_origins:
+        logger.warning("Wildcard '*' CORS origin removed in production mode.")
+    allowed_origins = [o for o in allowed_origins if o != "*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Accept", "Content-Type"],
 )
 
 
@@ -276,14 +354,50 @@ def _safe_explain_oct(
     predictor: NetraDrishtiPredictor, image: Image.Image, target_class: Optional[str]
 ):
     with inference_lock:
-        return predictor.explain_oct(image, target_class=target_class)
+        try:
+            return predictor.explain_oct(image, target_class=target_class)
+        finally:
+            gc.collect()
 
 
 def _safe_explain_fundus(
     predictor: NetraDrishtiPredictor, image: Image.Image, target_disease: Optional[str]
 ):
     with inference_lock:
-        return predictor.explain_fundus(image, target_disease=target_disease)
+        try:
+            return predictor.explain_fundus(image, target_disease=target_disease)
+        finally:
+            gc.collect()
+
+
+async def _run_bounded(fn: Callable[..., Any], *args: Any) -> Any:
+    """
+    Runs blocking CPU/XPU inference inside a worker thread with bounded concurrency
+    and request timeout protection.
+    """
+    sem = _get_queue_semaphore()
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=min(5.0, INFERENCE_TIMEOUT_SECONDS))
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=503,
+            detail="Inference queue is currently busy. Please retry shortly.",
+            headers={"Retry-After": "5"},
+        )
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(fn, *args),
+            timeout=INFERENCE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Inference request exceeded configured timeout.")
+        raise HTTPException(
+            status_code=504,
+            detail="Image processing timed out under current load. Please try again.",
+        )
+    finally:
+        sem.release()
 
 
 async def _prepare_and_guard_image(
@@ -301,7 +415,7 @@ async def _prepare_and_guard_image(
         )
 
     image = await validate_and_load_image(file)
-    validation = await asyncio.to_thread(
+    validation = await _run_bounded(
         _safe_validate_modality, app.state.modality_validator, image
     )
     _assert_expected_modality(validation, expected_modality)
@@ -310,8 +424,20 @@ async def _prepare_and_guard_image(
 
 @app.get("/", include_in_schema=False)
 async def root():
-    """Redirect root path to interactive Swagger documentation."""
-    return RedirectResponse(url="/docs")
+    """Redirect to docs when enabled, or return minimal service metadata."""
+    if ENABLE_DOCS:
+        return RedirectResponse(url="/docs")
+    return {"service": "NetraDrishti API", "status": "ok"}
+
+
+@app.get(
+    "/api/live",
+    tags=["System"],
+    summary="Container Liveness Probe",
+    description="Lightweight process liveness check for Azure Container Apps (independent of model readiness)."
+)
+async def liveness_check():
+    return {"status": "alive"}
 
 
 @app.get(
@@ -361,9 +487,11 @@ async def predict_oct(
     image = await _prepare_and_guard_image(file, "oct")
 
     try:
-        result = await asyncio.to_thread(
+        result = await _run_bounded(
             _safe_predict_oct, app.state.predictor, image
         )
+    except HTTPException:
+        raise
     except Exception:
         logger.error("Inference error during OCT prediction.", exc_info=True)
         raise HTTPException(
@@ -393,9 +521,11 @@ async def predict_fundus(
     image = await _prepare_and_guard_image(file, "fundus")
 
     try:
-        result = await asyncio.to_thread(
+        result = await _run_bounded(
             _safe_predict_fundus, app.state.predictor, image
         )
+    except HTTPException:
+        raise
     except Exception:
         logger.error("Inference error during Fundus prediction.", exc_info=True)
         raise HTTPException(
@@ -439,9 +569,11 @@ async def explain_oct(
     image = await _prepare_and_guard_image(file, "oct")
 
     try:
-        result = await asyncio.to_thread(
+        result = await _run_bounded(
             _safe_explain_oct, app.state.predictor, image, target_class
         )
+    except HTTPException:
+        raise
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception:
@@ -477,9 +609,11 @@ async def explain_fundus(
     image = await _prepare_and_guard_image(file, "fundus")
 
     try:
-        result = await asyncio.to_thread(
+        result = await _run_bounded(
             _safe_explain_fundus, app.state.predictor, image, disease
         )
+    except HTTPException:
+        raise
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception:

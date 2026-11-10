@@ -1,0 +1,13 @@
+# ==============================================================================
+# NetraDrishti — Production Backend Dependencies (Linux CPU)
+# Note: torch & torchvision CPU wheels are installed separately in Dockerfile
+# using https://download.pytorch.org/whl/cpu to avoid CUDA/XPU bloat.
+# ==============================================================================
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.30.0,<1.0.0
+python-multipart>=0.0.9
+pydantic>=2.7.0,<3.0.0
+pillow>=10.3.0
+opencv-python-headless>=4.9.0
+numpy>=1.26.0,<3.0.0
+

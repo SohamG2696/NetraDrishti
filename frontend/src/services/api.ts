@@ -13,6 +13,30 @@ import type {
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
+export function getApiDocsUrl(): string | null {
+  const enableDocs = String(import.meta.env.VITE_ENABLE_DOCS ?? 'true').toLowerCase();
+  if (enableDocs === 'false' || enableDocs === '0') {
+    return null;
+  }
+  if (API_BASE_URL) {
+    return `${API_BASE_URL}/docs`;
+  }
+  if (import.meta.env.DEV) {
+    return 'http://localhost:8000/docs';
+  }
+  return null;
+}
+
+if (
+  typeof window !== 'undefined' &&
+  window.location.protocol === 'https:' &&
+  API_BASE_URL.startsWith('http://')
+) {
+  console.warn(
+    'NetraDrishti configuration warning: HTTPS frontend cannot securely call an HTTP VITE_API_BASE_URL.'
+  );
+}
+
 export class ApiError extends Error {
   status: number;
   detail: string;

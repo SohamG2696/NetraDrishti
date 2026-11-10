@@ -33,10 +33,26 @@ from torchvision import transforms
 from torchvision.models import efficientnet_b0
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_STATS_PATH = BASE_DIR / "models" / "modality_validator_stats.npz"
-DEFAULT_CACHED_BACKBONE = (
-    Path(torch.hub.get_dir()) / "checkpoints" / "efficientnet_b0_rwightman-7f5810bc.pth"
-)
+BACKBONE_FILENAME = "efficientnet_b0_rwightman-7f5810bc.pth"
+
+
+def resolve_stats_path(model_dir: Optional[Path] = None) -> Path:
+    resolved_dir = Path(model_dir or os.getenv("MODEL_DIR", BASE_DIR / "models"))
+    candidate = resolved_dir / "modality_validator_stats.npz"
+    if candidate.exists():
+        return candidate
+    return BASE_DIR / "models" / "modality_validator_stats.npz"
+
+
+def resolve_backbone_path(model_dir: Optional[Path] = None) -> Path:
+    explicit = os.getenv("MODALITY_BACKBONE_PATH", "").strip()
+    if explicit:
+        return Path(explicit)
+    resolved_dir = Path(model_dir or os.getenv("MODEL_DIR", BASE_DIR / "models"))
+    in_model_dir = resolved_dir / BACKBONE_FILENAME
+    if in_model_dir.exists():
+        return in_model_dir
+    return Path(torch.hub.get_dir()) / "checkpoints" / BACKBONE_FILENAME
 
 
 @dataclass
@@ -69,15 +85,21 @@ class ModalityValidator:
 
     def __init__(
         self,
-        stats_path: Path = DEFAULT_STATS_PATH,
-        backbone_weights_path: Path = DEFAULT_CACHED_BACKBONE,
+        stats_path: Optional[Path] = None,
+        backbone_weights_path: Optional[Path] = None,
         device: Optional[torch.device] = None,
         thresholds: Optional[ModalityThresholds] = None,
+        model_dir: Optional[Path] = None,
     ):
-        self.device = device or torch.device("xpu" if torch.xpu.is_available() else "cpu")
+        has_xpu = hasattr(torch, "xpu") and torch.xpu.is_available()
+        self.device = device or torch.device("xpu" if has_xpu else "cpu")
         self.thresholds = thresholds or ModalityThresholds()
-        self.stats_path = Path(stats_path)
-        self.backbone_weights_path = Path(backbone_weights_path)
+        self.stats_path = Path(stats_path) if stats_path else resolve_stats_path(model_dir)
+        self.backbone_weights_path = (
+            Path(backbone_weights_path)
+            if backbone_weights_path
+            else resolve_backbone_path(model_dir)
+        )
         self.ready = False
         self.load_error: Optional[str] = None
 
