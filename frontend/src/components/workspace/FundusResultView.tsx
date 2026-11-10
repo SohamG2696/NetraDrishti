@@ -9,15 +9,30 @@ import {
   Cell
 } from 'recharts';
 import { CheckCircle2, AlertCircle, Eye, Info } from 'lucide-react';
-import type { FundusPredictionResponse } from '../../types/api';
+import type { FundusPredictionResponse, FundusExplanationResponse } from '../../types/api';
 import { FUNDUS_DISEASES } from '../../constants/clinicalInfo';
 import { DisclaimerBanner } from '../common/DisclaimerBanner';
+import { GradCamSection } from './GradCamSection';
 
 interface FundusResultViewProps {
   result: FundusPredictionResponse;
+  previewUrl: string | null;
+  explanation: FundusExplanationResponse | null;
+  explainLoading: boolean;
+  explainError: string | null;
+  onSelectDiseaseForExplain: (diseaseCode: string) => void;
+  onRetryExplain: () => void;
 }
 
-export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) => {
+export const FundusResultView: React.FC<FundusResultViewProps> = ({
+  result,
+  previewUrl,
+  explanation,
+  explainLoading,
+  explainError,
+  onSelectDiseaseForExplain,
+  onRetryExplain,
+}) => {
   const [selectedDisease, setSelectedDisease] = useState<string | null>(null);
 
   // Array of 8 disease predictions
@@ -206,12 +221,21 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
                 Clinical Context: {activeDiseaseInfo.fullName} ({activeDiseaseInfo.code})
               </h4>
             </div>
-            <button
-              onClick={() => setSelectedDisease(null)}
-              className="text-xs text-slate-400 hover:text-white"
-            >
-              Close
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => onSelectDiseaseForExplain(activeDiseaseInfo.code)}
+                className="rounded-lg border border-[#d9b77c]/40 bg-[#d9b77c]/10 px-2.5 py-1 text-[11px] font-semibold text-[#ebd5ad] hover:bg-[#d9b77c]/20"
+              >
+                Explain {activeDiseaseInfo.code} via Grad-CAM
+              </button>
+              <button
+                onClick={() => setSelectedDisease(null)}
+                className="text-xs text-slate-400 hover:text-white"
+              >
+                Close
+              </button>
+            </div>
           </div>
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300">
             <div>
@@ -303,6 +327,18 @@ export const FundusResultView: React.FC<FundusResultViewProps> = ({ result }) =>
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Explainable AI — Grad-CAM */}
+      <GradCamSection
+        modality="Fundus"
+        previewUrl={previewUrl}
+        fundusPrediction={result}
+        fundusExplanation={explanation}
+        loading={explainLoading}
+        error={explainError}
+        onSelectFundusDisease={onSelectDiseaseForExplain}
+        onRetry={onRetryExplain}
+      />
 
       {/* Disclaimer Banner */}
       <DisclaimerBanner />

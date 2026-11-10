@@ -1,6 +1,7 @@
 """
 NetraDrishti — Production-Oriented FastAPI Backend
-Integrates trained OCT (Swin-Tiny) and Fundus (EfficientNet-B0 + ResNet-50) models.
+Integrates trained OCT (Swin-Tiny) and Fundus (EfficientNet-B0 + ResNet-50) models,
+OOD-aware image modality guardrails, and authentic Grad-CAM explainability.
 """
 
 import io
@@ -10,10 +11,11 @@ import logging
 import threading
 import asyncio
 from pathlib import Path
+from typing import Optional
 from contextlib import asynccontextmanager
 
 from PIL import Image, UnidentifiedImageError
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi import FastAPI, File, Query, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,10 +25,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from inference.predictor import NetraDrishtiPredictor, DEVICE
+from inference.modality_validator import ModalityValidator, ModalityValidationResult
 from backend.schemas import (
     HealthResponse,
     OCTPredictionResponse,
     FundusPredictionResponse,
+    OCTExplanationResponse,
+    FundusExplanationResponse,
     DiseaseResult,
 )
 
@@ -48,7 +53,7 @@ DISCLAIMER_TEXT = (
     "Always consult a qualified ophthalmologist or healthcare professional for clinical evaluation."
 )
 
-# Inference thread-safety lock for concurrent execution
+# Inference & Grad-CAM thread-safety lock for concurrent execution
 inference_lock = threading.Lock()
 
 
@@ -56,18 +61,31 @@ inference_lock = threading.Lock()
 async def lifespan(app: FastAPI):
     """
     Application lifespan context manager:
-    Initializes NetraDrishtiPredictor once at startup.
+    Initializes NetraDrishtiPredictor and ModalityValidator once at startup.
     Reuses initialized models for all subsequent requests.
     """
-    logger.info("Initializing NetraDrishtiPredictor and loading model weights...")
+    logger.info("Initializing NetraDrishtiPredictor and ModalityValidator...")
     try:
         app.state.predictor = NetraDrishtiPredictor()
         app.state.models_ready = True
-        logger.info(f"NetraDrishtiPredictor successfully initialized on device: {DEVICE}")
-    except Exception as e:
-        logger.error(f"Failed to initialize NetraDrishtiPredictor: {e}", exc_info=True)
+        logger.info(f"NetraDrishtiPredictor initialized on device: {DEVICE}")
+    except Exception:
+        logger.error("Failed to initialize NetraDrishtiPredictor.", exc_info=True)
         app.state.predictor = None
         app.state.models_ready = False
+
+    try:
+        validator = ModalityValidator(device=DEVICE)
+        app.state.modality_validator = validator
+        app.state.validator_ready = bool(validator.ready)
+        if validator.ready:
+            logger.info("ModalityValidator guardrail initialized successfully.")
+        else:
+            logger.warning(f"ModalityValidator not ready: {validator.load_error}")
+    except Exception:
+        logger.error("Failed to initialize ModalityValidator.", exc_info=True)
+        app.state.modality_validator = None
+        app.state.validator_ready = False
 
     yield
 
@@ -78,10 +96,11 @@ app = FastAPI(
     title="NetraDrishti API — AI Retinal Disease Analysis",
     description=(
         "Production-oriented FastAPI backend for NetraDrishti, integrating deep learning models "
-        "for retinal disease analysis from OCT scans and Fundus photographs.\n\n"
+        "for retinal disease analysis from OCT scans and Fundus photographs, modality validation "
+        "guardrails, and real Grad-CAM explainability.\n\n"
         "**Disclaimer:** For research and educational purposes only. Not intended for clinical diagnosis."
     ),
-    version="1.0.0",
+    version="1.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -108,7 +127,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     """
     Fallback exception handler: Prevents exposing internal tracebacks or private system paths.
     """
-    logger.error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    logger.error(f"Unhandled error on {request.method} {request.url.path}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal server error occurred while processing the request."}
@@ -123,7 +142,6 @@ async def validate_and_load_image(file: UploadFile) -> Image.Image:
     - Guards against decompression bombs.
     - Decodes image strictly in-memory (no persistence).
     """
-    # 1. Validate file extension if filename is present
     if file.filename:
         ext = Path(file.filename).suffix.lower()
         if ext and ext not in ALLOWED_EXTENSIONS:
@@ -132,7 +150,6 @@ async def validate_and_load_image(file: UploadFile) -> Image.Image:
                 detail=f"Unsupported file format '{ext}'. Only JPEG and PNG images are accepted."
             )
 
-    # 2. Validate MIME type header if provided
     content_type = (file.content_type or "").lower().strip()
     if content_type and content_type not in ALLOWED_MIME_TYPES and content_type != "application/octet-stream":
         raise HTTPException(
@@ -140,9 +157,8 @@ async def validate_and_load_image(file: UploadFile) -> Image.Image:
             detail=f"Unsupported media type '{content_type}'. Only image/jpeg and image/png are accepted."
         )
 
-    # 3. Read file stream in chunks to enforce size limit securely
     total_bytes = bytearray()
-    chunk_size = 1024 * 1024  # 1 MB chunk
+    chunk_size = 1024 * 1024
     while True:
         chunk = await file.read(chunk_size)
         if not chunk:
@@ -160,21 +176,17 @@ async def validate_and_load_image(file: UploadFile) -> Image.Image:
             detail="Uploaded file is empty."
         )
 
-    # 4. Safe image decoding using Pillow with decompression bomb guard
     try:
-        # Cap max pixels to guard against decompression bombs
         Image.MAX_IMAGE_PIXELS = 25_000_000
         stream = io.BytesIO(total_bytes)
         img = Image.open(stream)
 
-        # Confirm decoded image format is JPEG or PNG
         if img.format not in ["JPEG", "PNG"]:
             raise HTTPException(
                 status_code=415,
                 detail=f"Unsupported image format '{img.format}'. Only JPEG and PNG images are accepted."
             )
 
-        # Force raster decoding to detect corrupted, truncated, or malformed data
         img.load()
         return img
     except HTTPException:
@@ -196,6 +208,60 @@ async def validate_and_load_image(file: UploadFile) -> Image.Image:
         )
 
 
+def _safe_validate_modality(
+    validator: ModalityValidator, image: Image.Image
+) -> ModalityValidationResult:
+    with inference_lock:
+        return validator.validate(image)
+
+
+def _assert_expected_modality(
+    res: ModalityValidationResult, expected_modality: str
+) -> None:
+    """
+    Enforces strict modality match before executing downstream disease inference.
+    """
+    if res.detected_modality == expected_modality:
+        return
+
+    metrics = res.metrics or {}
+    if expected_modality == "oct":
+        if res.detected_modality == "fundus":
+            raise HTTPException(
+                status_code=422,
+                detail="This image does not appear to be a valid retinal OCT scan. Please upload an OCT image."
+            )
+        cos_oct = metrics.get("oct_cosine", 0.0)
+        d_oct = metrics.get("oct_mahalanobis", 99.0)
+        if cos_oct >= 0.32 or d_oct <= 30.0:
+            raise HTTPException(
+                status_code=422,
+                detail="Unable to verify the imaging modality. Please check your image and try again."
+            )
+        raise HTTPException(
+            status_code=422,
+            detail="This image does not appear to be a valid retinal OCT scan. Please upload an OCT image."
+        )
+
+    # expected_modality == "fundus"
+    if res.detected_modality == "oct":
+        raise HTTPException(
+            status_code=422,
+            detail="This image does not appear to be a valid retinal Fundus photograph. Please upload a Fundus image."
+        )
+    cos_fun = metrics.get("fundus_cosine", 0.0)
+    d_fun = metrics.get("fundus_mahalanobis", 99.0)
+    if cos_fun >= 0.42 or d_fun <= 30.0:
+        raise HTTPException(
+            status_code=422,
+            detail="Unable to verify the imaging modality. Please check your image and try again."
+        )
+    raise HTTPException(
+        status_code=422,
+        detail="This image does not appear to be a valid retinal Fundus photograph. Please upload a Fundus image."
+    )
+
+
 def _safe_predict_oct(predictor: NetraDrishtiPredictor, image: Image.Image):
     with inference_lock:
         return predictor.predict_oct(image)
@@ -206,10 +272,43 @@ def _safe_predict_fundus(predictor: NetraDrishtiPredictor, image: Image.Image):
         return predictor.predict_fundus(image)
 
 
-@app.get(
-    "/",
-    include_in_schema=False
-)
+def _safe_explain_oct(
+    predictor: NetraDrishtiPredictor, image: Image.Image, target_class: Optional[str]
+):
+    with inference_lock:
+        return predictor.explain_oct(image, target_class=target_class)
+
+
+def _safe_explain_fundus(
+    predictor: NetraDrishtiPredictor, image: Image.Image, target_disease: Optional[str]
+):
+    with inference_lock:
+        return predictor.explain_fundus(image, target_disease=target_disease)
+
+
+async def _prepare_and_guard_image(
+    file: UploadFile, expected_modality: str
+) -> Image.Image:
+    if not getattr(app.state, "models_ready", False) or app.state.predictor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model service is currently unavailable. Please try again later."
+        )
+    if not getattr(app.state, "validator_ready", False) or app.state.modality_validator is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Modality validation guardrail is currently unavailable."
+        )
+
+    image = await validate_and_load_image(file)
+    validation = await asyncio.to_thread(
+        _safe_validate_modality, app.state.modality_validator, image
+    )
+    _assert_expected_modality(validation, expected_modality)
+    return image
+
+
+@app.get("/", include_in_schema=False)
 async def root():
     """Redirect root path to interactive Swagger documentation."""
     return RedirectResponse(url="/docs")
@@ -220,18 +319,21 @@ async def root():
     response_model=HealthResponse,
     tags=["System"],
     summary="API & Model Health Check",
-    description="Returns the health status of the API, active compute device, and model readiness."
+    description="Returns the health status of the API, active compute device, and readiness of models and modality guardrails."
 )
 async def health_check():
     models_ready = bool(getattr(app.state, "models_ready", False))
+    validator_ready = bool(getattr(app.state, "validator_ready", False))
+    all_ready = models_ready and validator_ready
     device_str = str(DEVICE)
 
-    if not models_ready:
+    if not all_ready:
         return JSONResponse(
             status_code=503,
             content={
                 "status": "unavailable",
-                "models_ready": False,
+                "models_ready": models_ready,
+                "validator_ready": validator_ready,
                 "device": device_str,
                 "supported_modalities": ["OCT", "Fundus"]
             }
@@ -239,7 +341,8 @@ async def health_check():
 
     return HealthResponse(
         status="healthy",
-        models_ready=True,
+        models_ready=models_ready,
+        validator_ready=validator_ready,
         device=device_str,
         supported_modalities=["OCT", "Fundus"]
     )
@@ -250,25 +353,19 @@ async def health_check():
     response_model=OCTPredictionResponse,
     tags=["Predictions"],
     summary="Predict Retinal OCT Disease",
-    description="Accepts a retinal OCT scan (JPEG/PNG) and returns predicted condition, confidence score, and 4-class distribution."
+    description="Validates modality as retinal OCT and returns predicted condition, confidence score, and 4-class distribution."
 )
 async def predict_oct(
     file: UploadFile = File(..., description="Retinal OCT scan image in JPEG or PNG format (max 10MB)")
 ):
-    if not getattr(app.state, "models_ready", False) or app.state.predictor is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Model service is currently unavailable. Please try again later."
-        )
-
-    image = await validate_and_load_image(file)
+    image = await _prepare_and_guard_image(file, "oct")
 
     try:
         result = await asyncio.to_thread(
             _safe_predict_oct, app.state.predictor, image
         )
-    except Exception as e:
-        logger.error(f"Inference error during OCT prediction: {e}", exc_info=True)
+    except Exception:
+        logger.error("Inference error during OCT prediction.", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="An internal server error occurred while processing the OCT scan."
@@ -288,25 +385,19 @@ async def predict_oct(
     response_model=FundusPredictionResponse,
     tags=["Predictions"],
     summary="Predict Retinal Fundus Multi-Disease",
-    description="Accepts a retinal Fundus photograph (JPEG/PNG) and returns prediction scores, thresholds, and detection results for 8 conditions."
+    description="Validates modality as retinal Fundus and returns prediction scores, thresholds, and detection results for 8 conditions."
 )
 async def predict_fundus(
     file: UploadFile = File(..., description="Retinal Fundus photograph in JPEG or PNG format (max 10MB)")
 ):
-    if not getattr(app.state, "models_ready", False) or app.state.predictor is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Model service is currently unavailable. Please try again later."
-        )
-
-    image = await validate_and_load_image(file)
+    image = await _prepare_and_guard_image(file, "fundus")
 
     try:
         result = await asyncio.to_thread(
             _safe_predict_fundus, app.state.predictor, image
         )
-    except Exception as e:
-        logger.error(f"Inference error during Fundus prediction: {e}", exc_info=True)
+    except Exception:
+        logger.error("Inference error during Fundus prediction.", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="An internal server error occurred while processing the Fundus image."
@@ -327,3 +418,98 @@ async def predict_fundus(
         disclaimer=DISCLAIMER_TEXT
     )
 
+
+@app.post(
+    "/api/explain/oct",
+    response_model=OCTExplanationResponse,
+    tags=["Explainability"],
+    summary="Generate OCT Swin-Tiny Grad-CAM Explanation",
+    description=(
+        "Validates modality as retinal OCT and computes real class-specific Swin-Tiny Grad-CAM "
+        "attribution over retinal tissue with padding masked out."
+    )
+)
+async def explain_oct(
+    file: UploadFile = File(..., description="Retinal OCT scan image in JPEG or PNG format (max 10MB)"),
+    target_class: Optional[str] = Query(
+        default=None,
+        description="Optional target OCT class (CNV, DME, DRUSEN, NORMAL). Defaults to predicted class."
+    ),
+):
+    image = await _prepare_and_guard_image(file, "oct")
+
+    try:
+        result = await asyncio.to_thread(
+            _safe_explain_oct, app.state.predictor, image, target_class
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception:
+        logger.error("Error generating OCT Grad-CAM explanation.", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to generate Grad-CAM explanation for this OCT image."
+        )
+
+    return OCTExplanationResponse(
+        **result,
+        disclaimer=DISCLAIMER_TEXT,
+    )
+
+
+@app.post(
+    "/api/explain/fundus",
+    response_model=FundusExplanationResponse,
+    tags=["Explainability"],
+    summary="Generate Fundus Ensemble Grad-CAM Explanation",
+    description=(
+        "Validates modality as retinal Fundus and generates disease-specific Grad-CAM maps from "
+        "EfficientNet-B0, ResNet-50, and their 50/50 weighted ensemble visualization."
+    )
+)
+async def explain_fundus(
+    file: UploadFile = File(..., description="Retinal Fundus photograph in JPEG or PNG format (max 10MB)"),
+    disease: Optional[str] = Query(
+        default=None,
+        description="Optional target disease code (DR, MH, ODC, TSLN, DN, MYA, ARMD, BRVO). Defaults to top detected/highest-scoring disease."
+    ),
+):
+    image = await _prepare_and_guard_image(file, "fundus")
+
+    try:
+        result = await asyncio.to_thread(
+            _safe_explain_fundus, app.state.predictor, image, disease
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception:
+        logger.error("Error generating Fundus Grad-CAM explanation.", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to generate Grad-CAM explanation for this Fundus image."
+        )
+
+    predictions = {
+        code: DiseaseResult(
+            score=data["score"],
+            threshold=data["threshold"],
+            detected=data["detected"],
+        )
+        for code, data in result["predictions"].items()
+    }
+
+    return FundusExplanationResponse(
+        modality=result["modality"],
+        selected_disease=result["selected_disease"],
+        selected_score=result["selected_score"],
+        selected_threshold=result["selected_threshold"],
+        selected_detected=result["selected_detected"],
+        predictions=predictions,
+        efficientnet_heatmap=result["efficientnet_heatmap"],
+        resnet_heatmap=result["resnet_heatmap"],
+        combined_heatmap=result["combined_heatmap"],
+        combined_overlay=result["combined_overlay"],
+        model_weights=result["model_weights"],
+        explanation_meta=result["explanation_meta"],
+        disclaimer=DISCLAIMER_TEXT,
+    )

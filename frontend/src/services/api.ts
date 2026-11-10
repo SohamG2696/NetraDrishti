@@ -3,7 +3,13 @@
  * Handles communication with the FastAPI backend
  */
 
-import type { HealthResponse, OCTPredictionResponse, FundusPredictionResponse } from '../types/api';
+import type {
+  HealthResponse,
+  OCTPredictionResponse,
+  FundusPredictionResponse,
+  OCTExplanationResponse,
+  FundusExplanationResponse,
+} from '../types/api';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -37,6 +43,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
       detail = 'The uploaded image exceeds the 10 MB limit.';
     } else if (response.status === 415) {
       detail = detail || 'Unsupported media type. Only JPEG and PNG images are accepted.';
+    } else if (response.status === 422) {
+      detail = detail || 'Unable to verify the imaging modality. Please check your image and try again.';
     } else if (response.status === 503) {
       detail = detail || 'The AI inference service is temporarily unavailable. Models are not ready.';
     }
@@ -116,6 +124,66 @@ export const api = {
       if (err instanceof ApiError) throw err;
       if (err instanceof Error && err.name === 'AbortError') throw err;
       throw new ApiError(0, 'Failed to complete Fundus analysis. Network or server error.');
+    }
+  },
+
+  /**
+   * Generate real Grad-CAM explanation for an OCT retinal scan
+   */
+  async explainOCT(
+    file: File,
+    targetClass?: string,
+    signal?: AbortSignal
+  ): Promise<OCTExplanationResponse> {
+    const params = targetClass ? `?target_class=${encodeURIComponent(targetClass)}` : '';
+    const url = `${API_BASE_URL}/api/explain/oct${params}`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': 'application/json'
+        },
+        signal
+      });
+      return handleResponse<OCTExplanationResponse>(response);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      throw new ApiError(0, 'Failed to generate OCT Grad-CAM explanation.');
+    }
+  },
+
+  /**
+   * Generate real Grad-CAM explanation for a Fundus retinal photograph
+   */
+  async explainFundus(
+    file: File,
+    disease?: string,
+    signal?: AbortSignal
+  ): Promise<FundusExplanationResponse> {
+    const params = disease ? `?disease=${encodeURIComponent(disease)}` : '';
+    const url = `${API_BASE_URL}/api/explain/fundus${params}`;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': 'application/json'
+        },
+        signal
+      });
+      return handleResponse<FundusExplanationResponse>(response);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      throw new ApiError(0, 'Failed to generate Fundus Grad-CAM explanation.');
     }
   }
 };

@@ -14,10 +14,12 @@ import type {
   HealthResponse,
   OCTPredictionResponse,
   FundusPredictionResponse,
+  OCTExplanationResponse,
+  FundusExplanationResponse,
   FileMetadata
 } from './types/api';
 import { api, ApiError } from './services/api';
-import { AlertCircle, Check, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Check, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 const OCTResultView = lazy(() => import('./components/workspace/OCTResultView').then(module => ({ default: module.OCTResultView })));
 const FundusResultView = lazy(() => import('./components/workspace/FundusResultView').then(module => ({ default: module.FundusResultView })));
@@ -66,15 +68,23 @@ export const App: React.FC = () => {
   // Analysis Lifecycle State
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [octResult, setOctResult] = useState<OCTPredictionResponse | null>(null);
   const [fundusResult, setFundusResult] = useState<FundusPredictionResponse | null>(null);
+
+  // Explainability State
+  const [octExplanation, setOctExplanation] = useState<OCTExplanationResponse | null>(null);
+  const [fundusExplanation, setFundusExplanation] = useState<FundusExplanationResponse | null>(null);
+  const [explainLoading, setExplainLoading] = useState<boolean>(false);
+  const [explainError, setExplainError] = useState<string | null>(null);
 
   // Health State
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthLoading, setHealthLoading] = useState<boolean>(true);
 
-  // AbortController Ref
+  // AbortController Refs
   const abortControllerRef = useRef<AbortController | null>(null);
+  const explainAbortRef = useRef<AbortController | null>(null);
 
   // Check Backend Health
   const checkHealth = useCallback(async () => {
@@ -98,13 +108,22 @@ export const App: React.FC = () => {
 
   // Handle File Selection & Extraction of Metadata
   const handleFileSelect = useCallback((file: File | null) => {
+    if (explainAbortRef.current) {
+      explainAbortRef.current.abort();
+      explainAbortRef.current = null;
+    }
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
 
     setErrorMessage(null);
+    setErrorStatus(null);
     setOctResult(null);
     setFundusResult(null);
+    setOctExplanation(null);
+    setFundusExplanation(null);
+    setExplainError(null);
+    setExplainLoading(false);
 
     if (!file) {
       setSelectedFile(null);
@@ -150,10 +169,19 @@ export const App: React.FC = () => {
   // Modality Selection Handler
   const handleSelectModality = (modality: Modality) => {
     if (modality !== selectedModality) {
+      if (explainAbortRef.current) {
+        explainAbortRef.current.abort();
+        explainAbortRef.current = null;
+      }
       setSelectedModality(modality);
       setOctResult(null);
       setFundusResult(null);
+      setOctExplanation(null);
+      setFundusExplanation(null);
       setErrorMessage(null);
+      setErrorStatus(null);
+      setExplainError(null);
+      setExplainLoading(false);
     }
   };
 
@@ -165,20 +193,80 @@ export const App: React.FC = () => {
     handleSelectView('workspace');
   };
 
+  const runExplainOCT = useCallback(async (file: File, targetClass?: string) => {
+    if (explainAbortRef.current) {
+      explainAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    explainAbortRef.current = controller;
+    setExplainLoading(true);
+    setExplainError(null);
+
+    try {
+      const exp = await api.explainOCT(file, targetClass, controller.signal);
+      setOctExplanation(exp);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setExplainError(
+        err instanceof ApiError
+          ? err.detail
+          : 'Unable to generate Grad-CAM attribution for this OCT scan.'
+      );
+    } finally {
+      if (explainAbortRef.current === controller) {
+        explainAbortRef.current = null;
+      }
+      setExplainLoading(false);
+    }
+  }, []);
+
+  const runExplainFundus = useCallback(async (file: File, diseaseCode?: string) => {
+    if (explainAbortRef.current) {
+      explainAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    explainAbortRef.current = controller;
+    setExplainLoading(true);
+    setExplainError(null);
+
+    try {
+      const exp = await api.explainFundus(file, diseaseCode, controller.signal);
+      setFundusExplanation(exp);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setExplainError(
+        err instanceof ApiError
+          ? err.detail
+          : 'Unable to generate Grad-CAM attribution for this Fundus image.'
+      );
+    } finally {
+      if (explainAbortRef.current === controller) {
+        explainAbortRef.current = null;
+      }
+      setExplainLoading(false);
+    }
+  }, []);
+
   // Run Inference Execution
   const handleAnalyze = async () => {
     if (!selectedFile) {
       setErrorMessage('Please select or upload a retinal image first.');
+      setErrorStatus(null);
       return;
     }
 
-    if (!health?.models_ready) {
-      setErrorMessage('The analysis service is unavailable. Please try again shortly.');
+    if (!health?.models_ready || health?.validator_ready === false) {
+      setErrorMessage('The analysis service or modality guardrail is unavailable. Please try again shortly.');
+      setErrorStatus(503);
       return;
     }
 
     setIsLoading(true);
     setErrorMessage(null);
+    setErrorStatus(null);
+    setOctExplanation(null);
+    setFundusExplanation(null);
+    setExplainError(null);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -188,20 +276,30 @@ export const App: React.FC = () => {
         const result = await api.predictOCT(selectedFile, controller.signal);
         setOctResult(result);
         setFundusResult(null);
+        setIsLoading(false);
+        void runExplainOCT(selectedFile, result.predicted_class);
       } else {
         const result = await api.predictFundus(selectedFile, controller.signal);
         setFundusResult(result);
         setOctResult(null);
+        setIsLoading(false);
+        void runExplainFundus(selectedFile);
       }
     } catch (err: unknown) {
+      setOctResult(null);
+      setFundusResult(null);
       if (err instanceof Error && err.name === 'AbortError') {
         setErrorMessage('Analysis was canceled by user.');
+        setErrorStatus(null);
       } else if (err instanceof ApiError) {
         setErrorMessage(err.detail);
+        setErrorStatus(err.status);
       } else if (err instanceof Error) {
         setErrorMessage(err.message);
+        setErrorStatus(null);
       } else {
         setErrorMessage('The analysis could not be completed. Please try again.');
+        setErrorStatus(null);
       }
     } finally {
       setIsLoading(false);
@@ -215,9 +313,15 @@ export const App: React.FC = () => {
       abortControllerRef.current.abort();
       setIsLoading(false);
     }
+    if (explainAbortRef.current) {
+      explainAbortRef.current.abort();
+      setExplainLoading(false);
+    }
   };
 
-  const isBackendReady = Boolean(health?.models_ready && health?.status === 'healthy');
+  const isBackendReady = Boolean(
+    health?.models_ready && health?.validator_ready !== false && health?.status === 'healthy'
+  );
 
   return (
     <div className="app-shell flex min-h-screen flex-col text-slate-100">
@@ -277,13 +381,31 @@ export const App: React.FC = () => {
                 </aside>
               </div>
 
-              {/* Global Error Banner */}
+              {/* Global Error / Guardrail Banner */}
               {errorMessage && (
-                <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-xs text-rose-300">
-                  <AlertCircle className="h-5 w-5 shrink-0 text-rose-400 mt-0.5" />
+                <div
+                  role="alert"
+                  className={`flex items-start gap-3 rounded-xl border p-4 text-xs ${
+                    errorStatus === 422
+                      ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                      : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                  }`}
+                >
+                  {errorStatus === 422 ? (
+                    <ShieldAlert className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="h-5 w-5 shrink-0 text-rose-400 mt-0.5" />
+                  )}
                   <div className="space-y-1">
-                    <p className="font-semibold text-rose-200">Analysis Halted</p>
-                    <p className="text-rose-300/90 leading-relaxed">{errorMessage}</p>
+                    <p className={`font-semibold ${errorStatus === 422 ? 'text-amber-300' : 'text-rose-200'}`}>
+                      {errorStatus === 422 ? 'Image Modality Guardrail' : 'Analysis Halted'}
+                    </p>
+                    <p className="leading-relaxed">{errorMessage}</p>
+                    {errorStatus === 422 && (
+                      <p className="text-[11px] opacity-80 pt-1">
+                        Replace the uploaded file above or verify that you selected the matching imaging pathway ({selectedModality}).
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -291,13 +413,33 @@ export const App: React.FC = () => {
               {/* Inference Results Section */}
               {selectedModality === 'OCT' && octResult && (
                 <div className="result-region pt-4 border-t border-navy-800" aria-live="polite">
-                  <Suspense fallback={<p role="status" className="py-8 text-sm text-slate-400">Preparing your OCT results…</p>}><OCTResultView result={octResult} /></Suspense>
+                  <Suspense fallback={<p role="status" className="py-8 text-sm text-slate-400">Preparing your OCT results…</p>}>
+                    <OCTResultView
+                      result={octResult}
+                      previewUrl={previewUrl}
+                      explanation={octExplanation}
+                      explainLoading={explainLoading}
+                      explainError={explainError}
+                      onSelectTargetClass={(cls) => selectedFile && void runExplainOCT(selectedFile, cls)}
+                      onRetryExplain={() => selectedFile && void runExplainOCT(selectedFile, octResult.predicted_class)}
+                    />
+                  </Suspense>
                 </div>
               )}
 
               {selectedModality === 'Fundus' && fundusResult && (
                 <div className="result-region pt-4 border-t border-navy-800" aria-live="polite">
-                  <Suspense fallback={<p role="status" className="py-8 text-sm text-slate-400">Preparing your fundus results…</p>}><FundusResultView result={fundusResult} /></Suspense>
+                  <Suspense fallback={<p role="status" className="py-8 text-sm text-slate-400">Preparing your fundus results…</p>}>
+                    <FundusResultView
+                      result={fundusResult}
+                      previewUrl={previewUrl}
+                      explanation={fundusExplanation}
+                      explainLoading={explainLoading}
+                      explainError={explainError}
+                      onSelectDiseaseForExplain={(code) => selectedFile && void runExplainFundus(selectedFile, code)}
+                      onRetryExplain={() => selectedFile && void runExplainFundus(selectedFile)}
+                    />
+                  </Suspense>
                 </div>
               )}
 

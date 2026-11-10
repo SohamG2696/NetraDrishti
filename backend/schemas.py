@@ -2,7 +2,7 @@
 Pydantic response and request models for NetraDrishti API.
 """
 
-from typing import Dict, List
+from typing import Any, Dict, List
 from pydantic import BaseModel, Field
 
 
@@ -14,7 +14,12 @@ class HealthResponse(BaseModel):
     )
     models_ready: bool = Field(
         ...,
-        description="Whether the ML models are initialized and ready for inference",
+        description="Whether the ML disease models are initialized and ready for inference",
+        examples=[True]
+    )
+    validator_ready: bool = Field(
+        default=False,
+        description="Whether the image modality guardrail validator is initialized and ready",
         examples=[True]
     )
     device: str = Field(
@@ -89,3 +94,47 @@ class FundusPredictionResponse(BaseModel):
         description="Educational and research use disclaimer"
     )
 
+
+class OCTExplanationResponse(BaseModel):
+    modality: str = Field(default="OCT", description="Imaging modality analyzed")
+    predicted_class: str = Field(..., description="Top predicted OCT class")
+    selected_class: str = Field(..., description="Class targeted for Grad-CAM attribution")
+    confidence: float = Field(..., description="Top predicted class Softmax score")
+    selected_score: float = Field(..., description="Softmax score for selected_class")
+    scores: Dict[str, float] = Field(..., description="Softmax scores across all 4 OCT classes")
+    heatmap: str = Field(..., description="Base64 PNG data URL of tissue-aligned Grad-CAM heatmap")
+    overlay: str = Field(..., description="Base64 PNG data URL of Grad-CAM overlay on OCT scan")
+    explanation_meta: Dict[str, Any] = Field(
+        ..., description="Layer target, gradient diagnostics, and padding-masking metadata"
+    )
+    disclaimer: str = Field(..., description="Educational and research use disclaimer")
+
+
+class FundusExplanationResponse(BaseModel):
+    modality: str = Field(default="Fundus", description="Imaging modality analyzed")
+    selected_disease: str = Field(..., description="Disease label targeted for Grad-CAM")
+    selected_score: float = Field(..., description="Ensemble score for selected_disease")
+    selected_threshold: float = Field(..., description="Decision threshold for selected_disease")
+    selected_detected: bool = Field(..., description="Whether selected_disease met threshold")
+    predictions: Dict[str, DiseaseResult] = Field(
+        ..., description="All 8 ensemble disease scores, thresholds, and detection flags"
+    )
+    efficientnet_heatmap: str = Field(
+        ..., description="Base64 PNG data URL of EfficientNet-B0 Grad-CAM"
+    )
+    resnet_heatmap: str = Field(
+        ..., description="Base64 PNG data URL of ResNet-50 Grad-CAM"
+    )
+    combined_heatmap: str = Field(
+        ..., description="Base64 PNG data URL of weighted combined visualization"
+    )
+    combined_overlay: str = Field(
+        ..., description="Base64 PNG data URL of combined heatmap overlaid on Fundus image"
+    )
+    model_weights: Dict[str, float] = Field(
+        ..., description="Saved ensemble weights applied to combine individual heatmaps"
+    )
+    explanation_meta: Dict[str, Any] = Field(
+        ..., description="Target layers, gradient diagnostics, and ensemble blending notes"
+    )
+    disclaimer: str = Field(..., description="Educational and research use disclaimer")

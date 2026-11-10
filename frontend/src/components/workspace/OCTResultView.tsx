@@ -9,15 +9,30 @@ import {
   Cell
 } from 'recharts';
 import { CheckCircle2, Info, Layers, ShieldAlert } from 'lucide-react';
-import type { OCTPredictionResponse } from '../../types/api';
+import type { OCTPredictionResponse, OCTExplanationResponse } from '../../types/api';
 import { OCT_CONDITIONS } from '../../constants/clinicalInfo';
 import { DisclaimerBanner } from '../common/DisclaimerBanner';
+import { GradCamSection } from './GradCamSection';
 
 interface OCTResultViewProps {
   result: OCTPredictionResponse;
+  previewUrl: string | null;
+  explanation: OCTExplanationResponse | null;
+  explainLoading: boolean;
+  explainError: string | null;
+  onSelectTargetClass: (targetClass: string) => void;
+  onRetryExplain: () => void;
 }
 
-export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
+export const OCTResultView: React.FC<OCTResultViewProps> = ({
+  result,
+  previewUrl,
+  explanation,
+  explainLoading,
+  explainError,
+  onSelectTargetClass,
+  onRetryExplain,
+}) => {
   const predictedInfo = OCT_CONDITIONS[result.predicted_class] || {
     code: result.predicted_class,
     name: result.predicted_class,
@@ -232,6 +247,18 @@ export const OCTResultView: React.FC<OCTResultViewProps> = ({ result }) => {
           </div>
         </div>
       </div>
+
+      {/* Explainable AI — Grad-CAM */}
+      <GradCamSection
+        modality="OCT"
+        previewUrl={previewUrl}
+        octPrediction={result}
+        octExplanation={explanation}
+        loading={explainLoading}
+        error={explainError}
+        onSelectOCTClass={onSelectTargetClass}
+        onRetry={onRetryExplain}
+      />
 
       {/* Medical Disclaimer Banner */}
       <DisclaimerBanner />

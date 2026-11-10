@@ -6,10 +6,10 @@
 [![TailwindCSS](https://img.shields.io/badge/Styles-Tailwind%20CSS-38B2AC?style=flat-square&logo=tailwind-css)](https://tailwindcss.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
-**NetraDrishti** is an advanced, dual-modality ophthalmic screening platform designed to assist in retinal disease triage. By integrating hierarchical **Vision Transformers (Swin-Tiny)** for cross-sectional Optical Coherence Tomography (OCT) scans and a **dual-backbone CNN ensemble (EfficientNet-B0 + ResNet-50)** for digital color Fundus photography, NetraDrishti provides rapid, automated detection across major blinding retinal pathologies.
+**NetraDrishti** is an advanced, dual-modality ophthalmic screening platform designed to assist in retinal disease triage. By integrating hierarchical **Vision Transformers (Swin-Tiny)** for cross-sectional Optical Coherence Tomography (OCT) scans and a **dual-backbone CNN ensemble (EfficientNet-B0 + ResNet-50)** for digital color Fundus photography — combined with **out-of-distribution (OOD) modality validation guardrails** and **real gradient-based Grad-CAM explainability** — NetraDrishti provides transparent, automated retinal pattern analysis.
 
 > [!IMPORTANT]
-> **Medical & Research Disclaimer:** NetraDrishti is developed strictly for research, educational, and scientific evaluation purposes. It is **not** certified as a clinical medical device under FDA or CE regulations. Predictions, probability distributions, and detection flags are algorithmic estimates and must never substitute for professional clinical evaluation by a licensed ophthalmologist or optometrist.
+> **Medical & Research Disclaimer:** NetraDrishti is developed strictly for research, educational, and scientific evaluation purposes. It is **not** certified as a clinical medical device under FDA or CE regulations. Predictions, probability distributions, detection flags, and Grad-CAM heatmaps are algorithmic estimates and must never substitute for professional clinical evaluation by a licensed ophthalmologist or optometrist.
 
 ---
 
@@ -18,7 +18,7 @@
 ```
                       ┌────────────────────────────────────────┐
                       │    Client / React 19 + TypeScript      │
-                      │  (Modality Selector, Preview, Charts)  │
+                      │  (Modality Toggle, Grad-CAM Overlay)   │
                       └───────────────────┬────────────────────┘
                                           │ Multipart Upload (JPEG/PNG)
                                           ▼
@@ -29,19 +29,27 @@
                       │   - Non-Blocking Thread Execution      │
                       └───────────────────┬────────────────────┘
                                           │
+                                          ▼
+                      ┌────────────────────────────────────────┐
+                      │   Image Modality Validation Guardrail  │
+                      │   ImageNet EffNet-B0 PCA-128 Manifold  │
+                      │   -> Accepts: oct / fundus             │
+                      │   -> Rejects: unknown / wrong (422)    │
+                      └───────────────────┬────────────────────┘
+                                          │ (Verified Modality Only)
                    ┌──────────────────────┴──────────────────────┐
                    │                                             │
                    ▼ (OCT Mode)                                  ▼ (Fundus Mode)
         ┌─────────────────────┐                       ┌─────────────────────┐
         │  Swin Transformer   │                       │  50/50 Dual Ensemble│
         │      (Swin-T)       │                       │ EfficientNet-B0 +   │
-        │                     │                       │ ResNet-50           │
+        │  Grad-CAM: feat.7.1 │                       │ ResNet-50           │
         └──────────┬──────────┘                       └──────────┬──────────┘
                    │                                             │
                    ▼                                             ▼
-       4-Class Softmax Output                        8-Disease Sigmoid Scores
-       • CNV     • DME                               • DR   • MH   • ODC • TSLN
-       • DRUSEN  • NORMAL                            • DN   • MYA  • ARMD • BRVO
+       4-Class Softmax + CAM                        8-Disease Sigmoid + 3 CAMs
+       • CNV     • DME                              (EffNet, ResNet, Combined)
+       • DRUSEN  • NORMAL
 ```
 
 ---
@@ -62,19 +70,61 @@
   - Decision Logic: $0.5 \times \text{Sigmoid}(\text{EffNet}) + 0.5 \times \text{Sigmoid}(\text{ResNet})$ compared against individual disease decision thresholds optimized on validation data.
   - Output: Multi-label classification with scores, calibrated thresholds, and detection flags.
 
-### 3. Production-Oriented Backend
-- **FastAPI Core:** Automatic Swagger documentation at `/docs` and ReDoc at `/redoc`.
-- **Model Lifecycle:** Checkpoints loaded once during application startup via lifespan context manager; models remain resident in memory without reload per request.
-- **Asynchronous & Thread-Safe:** ML inference runs in dedicated worker threads via `asyncio.to_thread` with a mutex lock around model forward passes to safeguard CPU/XPU acceleration.
-- **Zero-Persistence Privacy:** Retinal images are processed entirely in-memory using volatile `io.BytesIO` streams; no user images are stored to disk.
-- **Security Protections:** 10 MB chunked stream limit prevents memory overflow; Pillow decompression bomb protection capped at 25 million pixels.
+### 3. Real Grad-CAM Explainability (`inference/gradcam.py`)
+- **OCT Swin-Tiny Grad-CAM (`SwinOCTGradCAM`):**
+  - **Target Layer Selection:** Targets `model.features[-1][-1]` (`features.7.1`, the final `SwinTransformerBlock` before `model.norm`), whose channel-last activations `[B, 8, 8, 768]` are permuted to `[B, 768, 8, 8]`.
+  - **Why not `model.norm`?** In `torchvision.models.swin_t`, `model.norm` is immediately followed by global average pooling and a linear head. Backpropagating from logits to `model.norm` yields spatially constant gradients ($\sigma_{\text{spatial}} = 0.0$), reducing Grad-CAM to plain CAM. Targeting `features.7.1` preserves genuine non-zero spatial gradient variation across the $8\times 8$ token grid.
+  - **Padding Masking & Tissue Alignment:** The $8\times 8$ CAM is upsampled to $(256, 256)$, strictly zero-masked outside the active tissue bounding box $[y:y+h, x:x+w]$, min-max normalized inside the retinal tissue region, and aspect-ratio matched to the original image dimensions.
+- **Fundus Multilabel Ensemble Grad-CAM (`FundusEnsembleGradCAM`):**
+  - **Independent Backbone Attribution:** Computes disease-specific Grad-CAM independently for EfficientNet-B0 (`features.8`, $10\times 10 \times 1280$) and ResNet-50 (`layer4.2`, $10\times 10 \times 2048$) using each network's disease probability $\sigma(z_d)$ as the gradient target (falling back to raw logit only if $\sigma(z_d)(1-\sigma(z_d)) < 10^{-7}$).
+  - **Weighted Ensemble Visualization:** Each individual CAM is upsampled to $(320, 320)$, masked to the active retinal crop (`ImageOps.pad` bounds), min-max normalized independently to $[0, 1]$, and blended using saved checkpoint weights ($0.5 \times \text{CAM}_{\text{eff}} + 0.5 \times \text{CAM}_{\text{res}}$) without double-weighting gradients.
+  - **Limitations of Ensemble Grad-CAM:** The combined Fundus map is a weighted visualization of individual model explanations rather than a direct single-graph gradient of the entire probability-blended ensemble. Because final spatial maps are $8\times 8$ (OCT) and $10\times 10$ (Fundus), heatmaps indicate coarse spatial influence rather than pixel-accurate lesion segmentation.
+- **Safety & Memory Lifecycle:** Forward hooks are registered per request inside a `try ... finally` block under a mutex lock (`threading.Lock()`) using `torch.autograd.grad`, ensuring hooks and intermediate graphs are released immediately while ordinary `predict_*` calls remain under `@torch.inference_mode()`.
 
-### 4. Interactive Healthcare Frontend
-- **Design System:** Ophthalmology-themed dark navy palette (`#050811`, `#080d1a`, `#0d1527`) with cyan and teal accents.
-- **Real-Time Health Status:** Header badge continuously polls `/api/health` to reflect backend readiness.
-- **File Management:** Drag-and-drop zone with image dimensions detection and bundled demo presets (`sample_oct_cnv.jpeg`, `sample_fundus_dr.png`).
-- **Interactive Visualizations:** Recharts horizontal bar charts for OCT probability distributions and Fundus score-versus-threshold comparisons.
-- **Clinical Biomarker Context:** Explanatory clinical cards detailing pathology hallmarks and clinical significance.
+### 4. Image Modality Validation Guardrail (`inference/modality_validator.py`)
+- **Method:** Screens images *before* disease inference or Grad-CAM using an out-of-distribution (OOD) aware feature geometry over locally cached ImageNet-pretrained `efficientnet_b0` embeddings ($1280\text{-D} \rightarrow \text{PCA-}128$):
+  1. Structural sanity check (minimum dimension $\ge 32\text{ px}$, grayscale pixel std $\ge 3.0$).
+  2. L2-normalized cosine similarity to calibrated OCT and Fundus centroids.
+  3. Regularized Ledoit-Wolf Mahalanobis distance in PCA-128 space.
+  4. Calibrated 2-class OCT-vs-Fundus logistic discriminator with abstention margin.
+- **Threshold Selection (`scripts/calibrate_modality_validator.py`):**
+  - Fitted on disjoint training splits ($600$ OCT train + $600$ Fundus train) and tuned on validation splits ($400$ OCT + $300$ Fundus) against OOD negatives:
+    - OCT acceptance: $d_{\text{oct}} \le 24.0$, $\cos_{\text{oct}} \ge 0.45$, $p_{\text{oct}} \ge 0.90$, $\cos_{\text{oct}} - \cos_{\text{fun}} \ge 0.15$.
+    - Fundus acceptance: $d_{\text{fun}} \le 24.0$, $\cos_{\text{fun}} \ge 0.55$, $(1 - p_{\text{oct}}) \ge 0.90$, $\cos_{\text{fun}} - \cos_{\text{oct}} \ge 0.15$.
+  - Any input outside these boundaries abstains safely as `unknown` and returns `HTTP 422` without calling the disease classifier.
+
+### 5. Interactive Explainable AI Interface
+- **Guardrail Feedback:** Displays clear modality rejection notices (`HTTP 422`) when wrong-modality, non-retinal, or ambiguous images are uploaded.
+- **Explainable AI — Grad-CAM Workspace:**
+  - Interactive class selector (`CNV`, `DME`, `DRUSEN`, `NORMAL`) for OCT and disease selector (`DR`, `MH`, `ODC`, `TSLN`, `DN`, `MYA`, `ARMD`, `BRVO` — including below-threshold conditions) for Fundus.
+  - View mode switcher for Fundus: **Combined Ensemble (default)**, **EfficientNet-B0**, and **ResNet-50**.
+  - 3-panel comparison: Original Retinal Image, Grad-CAM Map, and Interactive Overlay with a `0%–100%` opacity slider.
+  - Client-side PNG export (`Download Overlay PNG`) enabled strictly when a genuine heatmap has been generated.
+
+---
+
+## Verified Model & Guardrail Evaluation
+
+### 1. Disease Classification Metrics (Validation Splits)
+- **OCT Swin-Tiny:** **95.02%** validation accuracy on Kermany OCT (Epoch 3, 4 classes); **95.70%** test accuracy ($n=1001$, `notebooks/Grad_Cam.ipynb`).
+- **Fundus Dual Ensemble (50/50):** **0.5778** Macro F1, **0.8915** Mean AUROC, **0.5566** mAP across $640$ RFMiD validation images.
+
+### 2. Modality Guardrail Evaluation (Held-Out Splits)
+Evaluated strictly on completely held-out datasets (`OCT/test`, `RFMiD c. Testing Set`, external `skimage.data.retina`, and $33$ non-retinal/microscopy/grayscale/synthetic/ambiguous OOD images):
+
+| Evaluation Metric | Result | Count / Sample Size |
+|---|---:|---|
+| **OCT Acceptance Rate** | **99.80%** | `999 / 1001` (`OCT/test`) |
+| **OCT-to-Fundus Confusion** | **0.00%** | `0 / 1001` |
+| **OCT Unknown / Abstention Rate** | **0.20%** | `2 / 1001` |
+| **Fundus Acceptance Rate** | **99.84%** | `639 / 640` (`RFMiD c. Testing Set`) |
+| **Fundus-to-OCT Confusion** | **0.00%** | `0 / 640` |
+| **Fundus Unknown / Abstention Rate** | **0.16%** | `1 / 640` |
+| **External Fundus (`skimage.data.retina`)** | **Accepted (`fundus`)** | `1 / 1` |
+| **Non-Retinal / OOD Rejection Rate** | **100.00%** | `33 / 33` (natural photos, grayscale photos, microscopy `cell` / `immunohistochemistry`, synthetic noise, blurred/blended scans, 3D graphics) |
+
+> [!NOTE]
+> **Known Guardrail Limitations & Failure Cases:** Because no large multi-organ medical OOD benchmark (e.g., Chest X-ray, Brain MRI, Slit-lamp anterior segment datasets) was available locally for negative calibration, the guardrail is documented as a **provisional OOD screen**. Borderline or heavily degraded retinal scans ($0.20\%$ OCT, $0.16\%$ Fundus) may trigger conservative `unknown` abstention (`HTTP 422`), and unseen out-of-domain medical modalities outside the 33 local OOD test samples require additional external validation before clinical deployment.
 
 ---
 
@@ -102,206 +152,93 @@
 
 ---
 
-## Verified Model Evaluation Metrics
-
-All metrics reflect verified evaluation executed on validation splits:
-
-### 1. OCT Swin-Tiny Model
-- **Benchmark Dataset:** Kermany et al. Retinal OCT Dataset (Cell 2018)
-- **Validation Accuracy:** **95.02%** (`0.9502` at Epoch 3)
-- **Embedding Dimension:** 768
-- **Classification Paradigm:** 4-class multi-class Softmax
-
-### 2. Fundus Dual Ensemble Model
-- **Benchmark Dataset:** RFMiD (Retinal Fundus Multi-Disease Image Dataset)
-- **Validation Split Size:** 640 images across 8 disease targets
-- **Ensemble Policy:** 50% EfficientNet-B0 + 50% ResNet-50
-- **Validation Macro F1:** **0.5778** (vs. 0.5709 for standalone EffNet, 0.5632 for standalone ResNet)
-- **Mean AUROC:** **0.8915** (vs. 0.8863 for EffNet, 0.8780 for ResNet)
-- **Mean Average Precision (mAP):** **0.5566**
-
----
-
 ## Repository Structure
 
 ```text
 NetraDrishti/
 ├── backend/
-│   ├── __init__.py           # Backend package configuration
-│   ├── main.py               # FastAPI application, lifespan & endpoints
-│   └── schemas.py            # Pydantic v2 response schemas
+│   ├── __init__.py
+│   ├── main.py                     # FastAPI endpoints, 422 guardrails & thread locking
+│   └── schemas.py                  # Pydantic schemas (Prediction + Explanation)
 ├── frontend/
-│   ├── public/
-│   │   └── samples/          # Bundled demo retinal images
-│   ├── src/
-│   │   ├── components/       # Layout, landing & workspace components
-│   │   ├── constants/        # Clinical descriptions & knowledge base
-│   │   ├── services/         # API fetch client & AbortController logic
-│   │   ├── types/            # TypeScript data contracts
-│   │   ├── App.tsx           # Main application state coordinator
-│   │   └── main.tsx
-│   ├── index.html
-│   ├── package.json
-│   ├── tailwind.config.js
-│   └── vite.config.ts
-├── Fundus/                   # RFMiD dataset label mapping CSVs
-│   ├── a. RFMiD_Training_Labels.csv
-│   ├── b. RFMiD_Validation_Labels.csv
-│   └── c. RFMiD_Testing_Labels.csv
+│   ├── public/samples/             # Demo OCT and Fundus samples
+│   └── src/
+│       ├── components/workspace/
+│       │   ├── GradCamSection.tsx  # Interactive Grad-CAM viewer, opacity slider & PNG export
+│       │   ├── OCTResultView.tsx
+│       │   ├── FundusResultView.tsx
+│       │   ├── ImageUploader.tsx
+│       │   └── ModalitySelector.tsx
+│       ├── services/api.ts         # Typed API client (/predict/*, /explain/*, /health)
+│       └── types/api.ts
 ├── inference/
-│   └── predictor.py          # Standalone unified predictor class
+│   ├── gradcam.py                  # SwinOCTGradCAM & FundusEnsembleGradCAM
+│   ├── modality_validator.py       # ImageNet EffNet-B0 PCA-128 OOD modality guardrail
+│   └── predictor.py                # Unified predictor & explainability orchestration
 ├── models/
-│   ├── README.md             # Model checkpoint acquisition instructions
-│   ├── train_manifest.csv    # Training manifest
-│   └── val_manifest.csv      # Validation manifest
-├── notebooks/                # Research & training notebooks
-│   ├── EDA.ipynb             # Exploratory data analysis
-│   ├── Grad_Cam.ipynb        # Swin Transformer Grad-CAM interpretability
-│   └── Untitled.ipynb        # Fundus ensemble training & threshold calibration
-├── .env.example              # Environment variables template
-├── .gitignore                # Comprehensive ignore rules
-├── LICENSE                   # MIT License with medical disclaimer
-├── README.md                 # Project documentation
-└── requirements.txt          # Python dependencies
+│   ├── README.md                   # Checkpoint & calibration setup guide
+│   └── modality_validator_stats.npz
+├── notebooks/                      # Research & training notebooks (EDA, Grad_Cam, Fundus)
+├── scripts/
+│   └── calibrate_modality_validator.py  # Reproducible guardrail calibration & held-out eval
+├── tests/
+│   └── test_phase3.py              # Automated Grad-CAM, guardrail, endpoint & concurrency suite
+└── requirements.txt
 ```
-
----
-
-## Installation and Local Setup
-
-### Prerequisites
-- **Python:** 3.10 or newer (tested on Python 3.11/3.12)
-- **Node.js:** v18.0 or newer (tested on Node v22.20)
-- **npm:** 9.0 or newer
-- **Operating System:** Windows, Linux, or macOS
-
----
-
-### Step 1: Clone the Repository
-```bash
-git clone https://github.com/SohamG2696/NetraDrishti.git
-cd NetraDrishti
-```
-
----
-
-### Step 2: Configure Model Weights
-Model checkpoints (`*.pth`) are excluded from Git due to size restrictions. Ensure the following files are placed in the `models/` directory:
-- `models/swin_tiny_epoch3.pth`
-- `models/netradrishti_fundus_ensemble.pth`
-
-*(Refer to [models/README.md](models/README.md) for full checkpoint details).*
-
----
-
-### Step 3: Backend Setup (FastAPI)
-Using Windows PowerShell:
-
-```powershell
-# Optional: create and activate virtual environment
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Install required dependencies
-pip install -r requirements.txt
-
-# Start FastAPI backend server
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-The API documentation will be available at:
-- **Interactive Swagger UI:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **ReDoc Documentation:** [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
-- **Health Endpoint:** [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
-
----
-
-### Step 4: Frontend Setup (React + Vite)
-In a second PowerShell terminal:
-
-```powershell
-cd frontend
-
-# Install frontend dependencies
-npm install
-
-# Start Vite development server
-npm run dev
-```
-
-Open your browser at: **[http://localhost:5173](http://localhost:5173)**.
 
 ---
 
 ## API Specification
 
 ### `GET /api/health`
-Returns system status, active compute accelerator, and model readiness.
-```json
-{
-  "status": "healthy",
-  "models_ready": true,
-  "device": "cpu",
-  "supported_modalities": ["OCT", "Fundus"]
-}
-```
+Returns readiness for both disease models and the modality guardrail (`models_ready`, `validator_ready`, `device`).
 
-### `POST /api/predict/oct`
-Accepts a retinal OCT scan via `multipart/form-data` (`file`).
-```json
-{
-  "modality": "OCT",
-  "predicted_class": "CNV",
-  "confidence": 0.9914,
-  "scores": {
-    "CNV": 0.9914,
-    "DME": 0.0061,
-    "DRUSEN": 0.0017,
-    "NORMAL": 0.0008
-  },
-  "disclaimer": "NetraDrishti is designed for research and educational purposes only..."
-}
-```
+### `POST /api/predict/oct` and `POST /api/predict/fundus`
+Enforce upload limits (10 MB, JPEG/PNG), Pillow safe decoding, and modality validation (`HTTP 422` if wrong-modality or `unknown`) prior to running disease classification.
 
-### `POST /api/predict/fundus`
-Accepts a color retinal Fundus photograph via `multipart/form-data` (`file`).
-```json
-{
-  "modality": "Fundus",
-  "predictions": {
-    "DR": { "score": 0.9525, "threshold": 0.7640, "detected": true },
-    "MH": { "score": 0.0725, "threshold": 0.5925, "detected": false },
-    "ODC": { "score": 0.0467, "threshold": 0.5655, "detected": false },
-    "TSLN": { "score": 0.0951, "threshold": 0.5318, "detected": false },
-    "DN": { "score": 0.1676, "threshold": 0.6043, "detected": false },
-    "MYA": { "score": 0.0307, "threshold": 0.8476, "detected": false },
-    "ARMD": { "score": 0.2554, "threshold": 0.6837, "detected": false },
-    "BRVO": { "score": 0.8146, "threshold": 0.7858, "detected": true }
-  },
-  "disclaimer": "NetraDrishti is designed for research and educational purposes only..."
-}
+### `POST /api/explain/oct?target_class=<CNV|DME|DRUSEN|NORMAL>`
+Validates retinal OCT modality (`HTTP 422` on mismatch), computes Swin-Tiny Grad-CAM for `target_class` (defaulting to the top predicted class), and returns `predicted_class`, `selected_class`, `scores`, tissue-aligned `heatmap` & `overlay` PNG data URLs, `explanation_meta`, and `disclaimer`.
+
+### `POST /api/explain/fundus?disease=<DR|MH|ODC|TSLN|DN|MYA|ARMD|BRVO>`
+Validates retinal Fundus modality (`HTTP 422` on mismatch), computes disease-specific Grad-CAM maps for both EfficientNet-B0 and ResNet-50, blends normalized maps by ensemble weights, and returns `efficientnet_heatmap`, `resnet_heatmap`, `combined_heatmap`, `combined_overlay`, `predictions`, `model_weights`, `explanation_meta`, and `disclaimer`.
+
+---
+
+## Installation, Testing & Local Execution (Windows PowerShell)
+
+### 1. Backend & Frontend Startup
+```powershell
+# Terminal 1 — Start FastAPI backend
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2 — Start React frontend
+cd frontend
+npm install
+npm run dev
+```
+Open **[http://localhost:5173](http://localhost:5173)** (Swagger UI at **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**).
+
+### 2. Running Verification Tests
+```powershell
+# Run Phase 3 Grad-CAM, modality guardrail, API contract & concurrency tests
+python -u tests/test_phase3.py
+
+# Re-run modality guardrail calibration & full 1,641 held-out test split evaluation
+python -u scripts/calibrate_modality_validator.py
+
+# Frontend TypeScript check, lint & production bundle
+cd frontend
+npm run lint
+npm run build
 ```
 
 ---
 
 ## Dataset Attributions
 
-1. **Retinal OCT Dataset:**
-   - *Kermany, D. S., Goldbaum, M., Cai, W., et al.* (2018). "Identifying Medical Diagnoses and Treatable Diseases by Image-Based Deep Learning." *Cell*, 172(5), 1122-1131.
-2. **Retinal Fundus Multi-Disease Image Dataset (RFMiD):**
-   - *Pachade, S., Porwal, P., Thulkar, D., et al.* (2021). "Retinal Fundus Multi-Disease Image Dataset (RFMiD): A Dataset for Multi-Disease Detection." *Data*, 6(2), 14.
-
----
-
-## Known Limitations & Roadmap
-
-- **Model Interpretability:** Grad-CAM saliency mapping for Swin Transformers is validated in research notebooks (`notebooks/Grad_Cam.ipynb`) and planned for API exposure in future iterations.
-- **Single-Slice OCT Scope:** The current pipeline evaluates representative 2D B-scans rather than complete 3D volumetric OCT cubes.
-- **External Calibration:** While thresholds were optimized on RFMiD validation splits, multi-center prospective validation across diverse imaging hardware remains future work.
-
----
+1. **Retinal OCT Dataset:** *Kermany, D. S., Goldbaum, M., Cai, W., et al.* (2018). "Identifying Medical Diagnoses and Treatable Diseases by Image-Based Deep Learning." *Cell*, 172(5), 1122-1131.
+2. **Retinal Fundus Multi-Disease Image Dataset (RFMiD):** *Pachade, S., Porwal, P., Thulkar, D., et al.* (2021). "Retinal Fundus Multi-Disease Image Dataset (RFMiD): A Dataset for Multi-Disease Detection." *Data*, 6(2), 14.
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE) with an express medical and educational use limitation.
-
