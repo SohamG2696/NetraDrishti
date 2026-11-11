@@ -7,6 +7,7 @@ import { tissueRibbon, tissueHeight, cellularMaterial, retinalCup, retinaPoint, 
 
 export function createRetinalModel(host: HTMLDivElement, modality: Modality) {
   const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' });
+  renderer.debug.checkShaderErrors = window.location.search.includes('debugShaders');
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setClearColor(0x000000, 0);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;

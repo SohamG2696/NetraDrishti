@@ -7,19 +7,38 @@ export function RetinalModel({ modality }: { modality: Modality }) {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const lifecycle = { cancelled: false, started: false, dispose: undefined as (() => void) | undefined };
-    // Keep the two card renderers out of the initial eye journey's startup work.
+    const lifecycle = {
+      cancelled: false,
+      started: false,
+      rafId: 0,
+      dispose: undefined as (() => void) | undefined,
+    };
+    // Keep the two card renderers out of the initial eye journey's startup work,
+    // and stagger Fundus by one frame so both cards do not init in the same scroll tick.
     const observer = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting) || lifecycle.started) return;
       lifecycle.started = true;
       import('./retinalModelScene').then(({ createRetinalModel }) => {
         if (lifecycle.cancelled) return;
-        try { lifecycle.dispose = createRetinalModel(host, modality); }
-        catch { host.dataset.renderer = 'fallback'; }
+        const mount = () => {
+          if (lifecycle.cancelled) return;
+          try { lifecycle.dispose = createRetinalModel(host, modality); }
+          catch { host.dataset.renderer = 'fallback'; }
+        };
+        if (modality === 'Fundus') {
+          lifecycle.rafId = requestAnimationFrame(mount);
+        } else {
+          mount();
+        }
       }).catch(() => { if (!lifecycle.cancelled) host.dataset.renderer = 'fallback'; });
     }, { rootMargin: '250px' });
     observer.observe(host);
-    return () => { lifecycle.cancelled = true; observer.disconnect(); lifecycle.dispose?.(); };
+    return () => {
+      lifecycle.cancelled = true;
+      cancelAnimationFrame(lifecycle.rafId);
+      observer.disconnect();
+      lifecycle.dispose?.();
+    };
   }, [modality]);
 
   return <figure className="pathway-visual pathway-model">

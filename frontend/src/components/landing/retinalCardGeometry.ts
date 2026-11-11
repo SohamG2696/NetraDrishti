@@ -14,7 +14,7 @@ export function tissueHeight(x: number, z: number, offset: number) {
 /** Closed tissue volume with softly rounded margins and continuous cut faces. */
 export function tissueRibbon(top: number, bottom: number) {
   const positions: number[] = [], uvs: number[] = [], indices: number[] = [];
-  const nx = 96, nz = 40;
+  const nx = 64, nz = 28;
   const point = (i: number, j: number, offset: number) => {
     const u = i / nx * 2 - 1, v = j / nz * 2 - 1;
     const x = u * 1.8 * (1 - .055 * v ** 10);
@@ -51,16 +51,19 @@ export function cellularMaterial(color: number, layer: number) {
   const compile = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     compile(shader, renderer);
+    shader.uniforms.uCellDarken = { value: layer === 2 || layer === 4 ? .24 : .09 };
+    shader.uniforms.uCellUseColumns = { value: layer === 6 ? 1.0 : 0.0 };
+    shader.fragmentShader = `uniform float uCellDarken;\nuniform float uCellUseColumns;\n` + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
       #include <color_fragment>
       float cellularGrain=tissueNoise(vTissuePoint*vec3(145.0,210.0,145.0));
       float nuclei=smoothstep(.47,.78,cellularGrain);
       float columns=tissueNoise(vTissuePoint*vec3(180.0,9.0,180.0));
-      diffuseColor.rgb*=1.0-nuclei*${layer === 2 || layer === 4 ? '.24' : '.09'};
-      diffuseColor.rgb*=mix(.85,1.1,${layer === 6 ? 'columns' : 'cellularGrain'});
+      diffuseColor.rgb*=1.0-nuclei*uCellDarken;
+      diffuseColor.rgb*=mix(.85,1.1,mix(cellularGrain,columns,uCellUseColumns));
     `);
   };
-  material.customProgramCacheKey = () => `retinal-cellular-${layer}`;
+  material.customProgramCacheKey = () => 'retinal-cellular-v2';
   return material;
 }
 
@@ -74,7 +77,7 @@ export function retinaPoint(x: number, y: number, offset = 0) {
 /** Posterior eye cup, with a continuous cut edge connecting the two surfaces. */
 export function retinalCup(outer = false) {
   const positions: number[] = [], uvs: number[] = [], indices: number[] = [];
-  const rings = 64, sides = 160;
+  const rings = 48, sides = 112;
   for (let r = 0; r <= rings; r++) for (let s = 0; s <= sides; s++) {
     const a = s / sides * Math.PI * 2;
     const radius = r / rings * (outer ? 1.455 : 1.395) * (1 + .004 * Math.sin(a * 7) + .002 * Math.sin(a * 19));

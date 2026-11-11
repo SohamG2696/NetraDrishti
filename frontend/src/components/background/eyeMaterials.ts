@@ -36,27 +36,36 @@ const tissueNoise = `
   }
 `;
 
-/** Object-space material detail keeps tissue grain continuous across UV seams. */
+const tissueUniformsHeader = `
+  uniform float uTissueVariation;
+  uniform float uTissueRelief;
+  uniform vec3 uTissueTint;
+`;
+
+/** Object-space material detail keeps tissue grain continuous across UV seams and shares one compiled shader program across tissues. */
 export function addTissueDetail(material: THREE.MeshPhysicalMaterial, tissue: Tissue) {
-  const settings: Record<Tissue, { variation: number; relief: number; tint: string }> = {
-    sclera: { variation: .15, relief: .0012, tint: 'vec3(1.0,.78,.72)' },
-    choroid: { variation: .42, relief: .0025, tint: 'vec3(.82,.57,.55)' },
-    retina: { variation: .28, relief: .0009, tint: 'vec3(1.0,.71,.57)' },
-    ciliary: { variation: .38, relief: .0023, tint: 'vec3(.9,.58,.55)' },
-    nerve: { variation: .15, relief: .0014, tint: 'vec3(1.0,.87,.72)' },
+  const settings: Record<Tissue, { variation: number; relief: number; tint: [number, number, number] }> = {
+    sclera: { variation: .15, relief: .0012, tint: [1.0, .78, .72] },
+    choroid: { variation: .42, relief: .0025, tint: [.82, .57, .55] },
+    retina: { variation: .28, relief: .0009, tint: [1.0, .71, .57] },
+    ciliary: { variation: .38, relief: .0023, tint: [.9, .58, .55] },
+    nerve: { variation: .15, relief: .0014, tint: [1.0, .87, .72] },
   };
   const setting = settings[tissue];
   material.onBeforeCompile = shader => {
+    shader.uniforms.uTissueVariation = { value: setting.variation };
+    shader.uniforms.uTissueRelief = { value: setting.relief };
+    shader.uniforms.uTissueTint = { value: new THREE.Vector3(...setting.tint) };
     shader.vertexShader = `varying vec3 vTissuePoint;\n${shader.vertexShader}`;
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvTissuePoint = position;');
-    shader.fragmentShader = tissueNoise + shader.fragmentShader;
+    shader.fragmentShader = tissueNoise + tissueUniformsHeader + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
       #include <color_fragment>
       float tissueBroad=tissueFbm(vTissuePoint*6.0);
       float tissueGrain=tissueFbm(vTissuePoint*115.0);
       float tissueFibres=tissueNoise(vTissuePoint*vec3(170.0,34.0,140.0));
-      diffuseColor.rgb*=mix(1.0-${setting.variation.toFixed(3)},1.12,tissueBroad);
-      diffuseColor.rgb*=mix(vec3(1.0),${setting.tint},smoothstep(.38,.77,tissueBroad)*.3);
+      diffuseColor.rgb*=mix(1.0-uTissueVariation,1.12,tissueBroad);
+      diffuseColor.rgb*=mix(vec3(1.0),uTissueTint,smoothstep(.38,.77,tissueBroad)*.3);
       diffuseColor.rgb*=.97+tissueGrain*.06;
     `);
     shader.fragmentShader = shader.fragmentShader.replace('#include <roughnessmap_fragment>', `
@@ -65,7 +74,7 @@ export function addTissueDetail(material: THREE.MeshPhysicalMaterial, tissue: Ti
     `);
     shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', `
       #include <normal_fragment_maps>
-      float tissueHeight=(tissueGrain*.7+tissueFibres*.3)*${setting.relief.toFixed(4)};
+      float tissueHeight=(tissueGrain*.7+tissueFibres*.3)*uTissueRelief;
       vec3 tissueQ0=dFdx(-vViewPosition), tissueQ1=dFdy(-vViewPosition);
       vec3 tissueR1=cross(tissueQ1,normal), tissueR2=cross(normal,tissueQ0);
       float tissueDet=dot(tissueQ0,tissueR1);
@@ -73,14 +82,14 @@ export function addTissueDetail(material: THREE.MeshPhysicalMaterial, tissue: Ti
       normal=normalize(abs(tissueDet)*normal-tissueGradient);
     `);
   };
-  material.customProgramCacheKey = () => `ocular-tissue-v1-${tissue}`;
+  material.customProgramCacheKey = () => 'ocular-tissue-v2';
   return material;
 }
 
 /** A continuous folded tissue surface, rather than repeated mechanical-looking pieces. */
 export function createCiliaryGeometry() {
-  const radialSteps = 512;
-  const tubeSteps = 24;
+  const radialSteps = 256;
+  const tubeSteps = 16;
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
